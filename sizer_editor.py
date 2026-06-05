@@ -130,7 +130,8 @@ def main():
     if editor.exec() and editor.saved_presets is not None:
         sizer_engine.save_presets(editor.saved_presets)
         sizer_engine.reload_kwin_script()
-    return 0
+        return 0
+    return 1
 
 
 if __name__ == "__main__":

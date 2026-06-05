@@ -9,12 +9,14 @@ import sys
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QIcon
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 import sizer_engine
 from sizer_editor import PresetsEditor
 
 TRAY_ICON_NAMES = ["transform-scale", "view-fullscreen", "zoom-fit-best", "preferences-system-windows"]
+_INSTANCE_KEY = "just-right-window-sizer"
 
 
 class WindowSizerTray:
@@ -40,6 +42,8 @@ class WindowSizerTray:
         self.menu.clear()
         for preset in self.presets:
             action = self.menu.addAction(sizer_engine.preset_label(preset))
+            # 150 ms delay lets the tray menu fully close before the DBus trigger
+            # fires — without it the active window would be the menu itself.
             action.triggered.connect(
                 lambda _checked, chosen=preset: QTimer.singleShot(150, lambda: sizer_engine.trigger_preset(chosen))
             )
@@ -69,7 +73,24 @@ def main():
         print("No system tray is available on this session.", file=sys.stderr)
         return 1
 
-    tray_instance = WindowSizerTray(application)
+    # Single-instance guard: if another copy is already running, exit cleanly.
+    probe = QLocalSocket()
+    probe.connectToServer(_INSTANCE_KEY)
+    if probe.waitForConnected(200):
+        probe.close()
+        print("Just Right is already running.", file=sys.stderr)
+        return 0
+
+    instance_server = QLocalServer()
+    QLocalServer.removeServer(_INSTANCE_KEY)  # clean up any stale socket file
+    instance_server.listen(_INSTANCE_KEY)
+
+    # Keep both the tray and the server alive for the life of the process.
+    # Assigning to application attributes prevents Python's GC from collecting
+    # them (QSystemTrayIcon has no parent widget to keep it alive otherwise).
+    application._tray = WindowSizerTray(application)
+    application._instance_server = instance_server
+
     return application.exec()
 
 
