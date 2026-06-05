@@ -173,16 +173,12 @@ function applyToActiveWindow(targetWidth, targetHeight, position, windowOverride
         return;
     }}
 
-    // Detect maximized by geometry rather than win.maximizeMode, which returns a
-    // Qt flags object in KWin 6 scripting (always truthy — useless for comparison).
-    // Skip the heuristic for tiled windows: they may fill the screen but are not
-    // maximized, and setMaximize would break their tiling arrangement.
-    var screenArea = workspace.clientArea(KWin.MaximizeArea, win);
-    var geo = win.frameGeometry;
+    // maximizeMode returns a Qt flags object in KWin 6 scripting — plain == comparisons
+    // are useless (always truthy), but bitwise & coerces it to a number correctly.
+    // Bit 1 = vertically maximized, bit 2 = horizontally maximized.
+    // Skip tiled windows: they are not maximized and setMaximize would break tiling.
     var isTiled = win.tile !== null && win.tile !== undefined;
-    var isMaximized = !isTiled &&
-        geo.x <= screenArea.x + 4 && geo.y <= screenArea.y + 4 &&
-        geo.width >= screenArea.width - 4 && geo.height >= screenArea.height - 4;
+    var isMaximized = !isTiled && (win.maximizeMode & 3) === 3;
 
     win.setMaximize(false, false);
 
