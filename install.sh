@@ -9,6 +9,15 @@ set -euo pipefail
 PROJECT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_BIN="$(command -v python3)"
 
+# Prefer the Qt6 qdbus binary when available.
+if command -v qdbus6 >/dev/null 2>&1; then
+    QDBUS_BIN="qdbus6"
+elif command -v qdbus-qt6 >/dev/null 2>&1; then
+    QDBUS_BIN="qdbus-qt6"
+else
+    QDBUS_BIN="qdbus"
+fi
+
 echo "Using Python: $PYTHON_BIN"
 
 if ! "$PYTHON_BIN" -c "import PyQt6" >/dev/null 2>&1; then
@@ -17,8 +26,8 @@ if ! "$PYTHON_BIN" -c "import PyQt6" >/dev/null 2>&1; then
 fi
 
 echo "Enabling KWin's built-in geometry tooltip while resizing..."
-kwriteconfig6 --file kwinrc --group Windows --key GeometryTip true
-qdbus org.kde.KWin /KWin org.kde.KWin.reconfigure >/dev/null 2>&1 || true
+kwriteconfig6 --file kwinrc --group Windows --key GeometryTip true || true
+"$QDBUS_BIN" org.kde.KWin /KWin org.kde.KWin.reconfigure >/dev/null 2>&1 || true
 
 echo "Generating default presets and loading the KWin script..."
 ( cd "$PROJECT_DIRECTORY" && "$PYTHON_BIN" -c "import sizer_engine; sizer_engine.reload_kwin_script()" )
@@ -27,13 +36,17 @@ AUTOSTART_DIRECTORY="$HOME/.config/autostart"
 APPLICATIONS_DIRECTORY="$HOME/.local/share/applications"
 mkdir -p "$AUTOSTART_DIRECTORY" "$APPLICATIONS_DIRECTORY"
 
+# Escape spaces in paths for the freedesktop Exec= key (spec requires \  for spaces).
+EXEC_PYTHON="${PYTHON_BIN// /\\ }"
+EXEC_DIR="${PROJECT_DIRECTORY// /\\ }"
+
 echo "Installing autostart entry for the tray app..."
 cat > "$AUTOSTART_DIRECTORY/window-sizer.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Just Right
 Comment=Tray menu to resize windows to exact sizes
-Exec=$PYTHON_BIN $PROJECT_DIRECTORY/sizer_tray.py
+Exec=$EXEC_PYTHON $EXEC_DIR/sizer_tray.py
 Icon=transform-scale
 X-GNOME-Autostart-enabled=true
 DESKTOP
@@ -44,7 +57,7 @@ cat > "$APPLICATIONS_DIRECTORY/window-sizer-editor.desktop" <<DESKTOP
 Type=Application
 Name=Just Right — Edit Presets
 Comment=Add, edit, and delete saved window sizes
-Exec=$PYTHON_BIN $PROJECT_DIRECTORY/sizer_editor.py
+Exec=$EXEC_PYTHON $EXEC_DIR/sizer_editor.py
 Icon=transform-scale
 Categories=Utility;Settings;
 Terminal=false

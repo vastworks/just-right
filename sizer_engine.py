@@ -6,7 +6,9 @@ app and the presets editor import from here so there is a single source of truth
 """
 
 import json
+import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -29,14 +31,23 @@ DEFAULT_PRESETS = [
     {"name": "Compact", "width": 800, "height": 600, "position": "center"},
 ]
 
+# Prefer the Qt6 qdbus binary; fall back to the Qt5 one if needed.
+_QDBUS = next(
+    (cmd for cmd in ("qdbus6", "qdbus-qt6", "qdbus") if shutil.which(cmd)),
+    "qdbus",
+)
+
 
 def run_qdbus(object_path, method, *arguments):
     """Call a method on the org.kde.KWin / kglobalaccel DBus service.
 
-    Returns the trimmed stdout string, or None if qdbus reported an error.
+    Returns the trimmed stdout string, or None if the call failed.
     """
-    command = ["qdbus", _service_for(object_path), object_path, method, *map(str, arguments)]
-    completed = subprocess.run(command, capture_output=True, text=True)
+    command = [_QDBUS, _service_for(object_path), object_path, method, *map(str, arguments)]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=5)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
     if completed.returncode != 0:
         return None
     return completed.stdout.strip()
@@ -74,16 +85,27 @@ def _with_identifier(preset):
 
 def load_presets():
     ensure_config_exists()
-    with open(PRESETS_PATH, "r", encoding="utf-8") as presets_file:
-        raw_presets = json.load(presets_file)
+    try:
+        with open(PRESETS_PATH, "r", encoding="utf-8") as presets_file:
+            raw_presets = json.load(presets_file)
+    except (json.JSONDecodeError, ValueError):
+        print(
+            f"Warning: {PRESETS_PATH} is corrupted — falling back to defaults.",
+            file=sys.stderr,
+        )
+        raw_presets = list(DEFAULT_PRESETS)
     return [_with_identifier(preset) for preset in raw_presets]
 
 
 def save_presets(presets):
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     normalized = [_with_identifier(preset) for preset in presets]
-    with open(PRESETS_PATH, "w", encoding="utf-8") as presets_file:
+    # Write atomically: write to a temp file then rename (POSIX rename is atomic,
+    # so a crash mid-write never leaves presets.json truncated or partial).
+    tmp_path = PRESETS_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as presets_file:
         json.dump(normalized, presets_file, indent=2)
+    tmp_path.replace(PRESETS_PATH)
     return normalized
 
 
@@ -107,13 +129,20 @@ var windowSizerPresets = {presets_literal};
 
 function applyToActiveWindow(targetWidth, targetHeight, position) {{
     var activeWindow = workspace.activeWindow;
-    if (activeWindow === null) {{
+    if (!activeWindow) {{
         return;
     }}
 
     var win = activeWindow;
 
+    // Cancel any in-flight resize on this window (rapid double-trigger safety).
+    if (win._sizerHandler) {{
+        try {{ win.frameGeometryChanged.disconnect(win._sizerHandler); }} catch (e) {{}}
+        win._sizerHandler = null;
+    }}
+
     function doResize() {{
+        win._sizerHandler = null;
         var currentGeometry = win.frameGeometry;
         var newX = currentGeometry.x;
         var newY = currentGeometry.y;
@@ -127,29 +156,43 @@ function applyToActiveWindow(targetWidth, targetHeight, position) {{
         win.frameGeometry = {{ x: newX, y: newY, width: targetWidth, height: targetHeight }};
     }}
 
-    // Detect maximized state by geometry rather than maximizeMode, which
-    // returns a Qt flags object in KWin 6 scripting — truthy for all windows.
-    var screenArea = workspace.clientArea(KWin.MaximizeArea, win);
-    var geo = win.frameGeometry;
-    var needsUnmaximize = win.fullScreen ||
-        (geo.x <= screenArea.x + 4 && geo.y <= screenArea.y + 4 &&
-         geo.width >= screenArea.width - 4 && geo.height >= screenArea.height - 4);
-
-    if (win.fullScreen) {{
-        win.fullScreen = false;
-    }}
-    win.setMaximize(false, false);
-
-    if (needsUnmaximize) {{
-        // setMaximize is async on Wayland: KWin restores the pre-maximize
-        // geometry after our JS returns, overwriting a same-tick frameGeometry.
-        // Wait for frameGeometryChanged (fires once KWin has settled the
-        // restored geometry), then stamp our target size on top.
+    function deferResize() {{
         var handler = function () {{
             win.frameGeometryChanged.disconnect(handler);
+            win._sizerHandler = null;
             doResize();
         }};
+        win._sizerHandler = handler;
         win.frameGeometryChanged.connect(handler);
+    }}
+
+    // Fullscreen: attach the handler BEFORE changing state so we never miss the
+    // signal if KWin fires it synchronously during the property assignment.
+    if (win.fullScreen) {{
+        deferResize();
+        win.fullScreen = false;
+        return;
+    }}
+
+    // Detect maximized by geometry rather than win.maximizeMode, which returns a
+    // Qt flags object in KWin 6 scripting (always truthy — useless for comparison).
+    // Skip the heuristic for tiled windows: they may fill the screen but are not
+    // maximized, and setMaximize would break their tiling arrangement.
+    var screenArea = workspace.clientArea(KWin.MaximizeArea, win);
+    var geo = win.frameGeometry;
+    var isTiled = win.tile !== null && win.tile !== undefined;
+    var isMaximized = !isTiled &&
+        geo.x <= screenArea.x + 4 && geo.y <= screenArea.y + 4 &&
+        geo.width >= screenArea.width - 4 && geo.height >= screenArea.height - 4;
+
+    win.setMaximize(false, false);
+
+    if (isMaximized) {{
+        // setMaximize is async on Wayland: KWin restores the pre-maximize geometry
+        // after our JS returns, overwriting a same-tick frameGeometry assignment.
+        // Wait for frameGeometryChanged (fires once KWin has settled the restored
+        // geometry), then stamp our target size on top.
+        deferResize();
     }} else {{
         doResize();
     }}
