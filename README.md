@@ -4,8 +4,7 @@
 
 A Sizer-style window resizer for **KDE Plasma on Wayland**. (Project folder is
 `window-sizer/`; the user-facing name is "Just Right".) Resize the active window to exact
-dimensions from a system-tray menu (or a keyboard shortcut), and see live
-width × height while you drag a window's edge.
+dimensions from a system-tray menu or a keyboard shortcut.
 
 On Wayland, ordinary apps can't move or resize other apps' windows — only the
 compositor can. So the actual resizing is done by a tiny **KWin script**, and a
@@ -18,8 +17,6 @@ compositor can. So the actual resizing is done by a tiny **KWin script**, and a
   current monitor.
 - **Keyboard shortcuts (optional).** Every preset is also a KDE global action.
   Open *System Settings → Shortcuts*, search **"Window Sizer"**, and bind keys.
-- **Live geometry while resizing.** Uses KWin's built-in "show geometry when
-  moving or resizing" tooltip (the installer turns it on).
 - **Editable presets.** Add / edit / delete sizes in a small GUI.
 
 ## Install
@@ -31,7 +28,6 @@ bash install.sh
 
 The installer:
 - installs PyQt6 for the current user if it isn't already available,
-- turns on KWin's geometry tooltip,
 - writes default presets and loads the KWin script,
 - adds an autostart entry (tray starts at login) and a menu launcher for the editor.
 
@@ -48,7 +44,7 @@ setsid python3 sizer_tray.py >/dev/null 2>&1 &
 | `sizer_engine.py` | Shared logic: presets file, generates the KWin script, loads it, triggers presets over DBus |
 | `sizer_tray.py` | System-tray app — the menu of presets |
 | `sizer_editor.py` | PyQt6 dialog to add/edit/delete presets (also runs standalone) |
-| `install.sh` | One-shot setup: deps, geometry tooltip, autostart, launcher |
+| `install.sh` | One-shot setup: deps, autostart, launcher |
 
 ## Config
 
