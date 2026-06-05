@@ -18,7 +18,7 @@ compositor can. So the actual resizing is done by a tiny **KWin script**, and a
 - **Keyboard shortcuts (optional).** Every preset is also a KDE global action.
   Open *System Settings → Shortcuts*, search **"Window Sizer"**, and bind keys.
 - **Editable presets.** Add / edit / delete sizes in a small GUI.
-
+- **Size Popup** Size indicator appears whenever any window is resized
 ## Install
 
 ```bash
