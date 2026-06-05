@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Installer for Window Sizer (KDE Plasma / Wayland).
 # - ensures PyQt6 is available
-# - enables KWin's built-in "show geometry while resizing" tooltip
 # - generates default presets and loads the KWin script
 # - sets the tray app to start at login and adds a menu launcher for the editor
 set -euo pipefail
@@ -9,25 +8,12 @@ set -euo pipefail
 PROJECT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_BIN="$(command -v python3)"
 
-# Prefer the Qt6 qdbus binary when available.
-if command -v qdbus6 >/dev/null 2>&1; then
-    QDBUS_BIN="qdbus6"
-elif command -v qdbus-qt6 >/dev/null 2>&1; then
-    QDBUS_BIN="qdbus-qt6"
-else
-    QDBUS_BIN="qdbus"
-fi
-
 echo "Using Python: $PYTHON_BIN"
 
 if ! "$PYTHON_BIN" -c "import PyQt6" >/dev/null 2>&1; then
     echo "PyQt6 not found — installing for the current user..."
     "$PYTHON_BIN" -m pip install --user PyQt6
 fi
-
-echo "Enabling KWin's built-in geometry tooltip while resizing..."
-kwriteconfig6 --file kwinrc --group Windows --key GeometryTip true || true
-"$QDBUS_BIN" org.kde.KWin /KWin org.kde.KWin.reconfigure >/dev/null 2>&1 || true
 
 echo "Generating default presets and loading the KWin script..."
 ( cd "$PROJECT_DIRECTORY" && "$PYTHON_BIN" -c "import sizer_engine; sizer_engine.reload_kwin_script()" )
