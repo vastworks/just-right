@@ -215,6 +215,56 @@ registerUserActionsMenu(function (win) {{
         }})
     }};
 }});
+
+// ---------------------------------------------------------------------------
+// Geometry tooltip: show a size overlay whenever any window is resized.
+// Calls back to the tray app over DBus; the tray renders the overlay widget.
+// ---------------------------------------------------------------------------
+var _wsTooltipLastW = -1;
+var _wsTooltipLastH = -1;
+var _wsTooltipLastT = 0;
+
+function wsNotifySize(win) {{
+    var geo = win.frameGeometry;
+    // Only fire when the *size* changes, not on plain moves.
+    if (geo.width === _wsTooltipLastW && geo.height === _wsTooltipLastH) return;
+    // Throttle to ~15 fps so we don't hammer DBus on every pixel.
+    var now = Date.now();
+    if (now - _wsTooltipLastT < 66) return;
+    _wsTooltipLastW = geo.width;
+    _wsTooltipLastH = geo.height;
+    _wsTooltipLastT = now;
+    callDBus("org.justright.tray", "/SizeOverlay",
+             "", "showSize",
+             Math.round(geo.x), Math.round(geo.y),
+             Math.round(geo.width), Math.round(geo.height));
+}}
+
+function wsConnectWindow(win) {{
+    win.frameGeometryChanged.connect(function() {{ wsNotifySize(win); }});
+}}
+
+// Connect to all windows already open, then to any that open later.
+var _wsAllWindows = (typeof workspace.windowList === "function")
+    ? workspace.windowList()
+    : (workspace.windows || []);
+for (var _wsIdx = 0; _wsIdx < _wsAllWindows.length; _wsIdx++) {{
+    wsConnectWindow(_wsAllWindows[_wsIdx]);
+}}
+workspace.windowAdded.connect(wsConnectWindow);
+
+// ---------------------------------------------------------------------------
+// "Add current window size" shortcut — reads the active window's geometry
+// and sends it to the tray so the user can save it as a new preset.
+// ---------------------------------------------------------------------------
+registerShortcut("WindowSizer_AddCurrentSize", "Just Right: Add current window size", "", function() {{
+    var win = workspace.activeWindow;
+    if (!win) return;
+    var geo = win.frameGeometry;
+    callDBus("org.justright.tray", "/SizeOverlay",
+             "", "addCurrentSize",
+             Math.round(geo.width), Math.round(geo.height));
+}});
 """
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     with open(GENERATED_SCRIPT_PATH, "w", encoding="utf-8") as script_file:
