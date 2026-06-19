@@ -153,6 +153,15 @@ function applyToActiveWindow(targetWidth, targetHeight, position, windowOverride
         // Qt.rect() is QML-only; plain JS objects are converted to QRectF
         // via KWin's registered QJSValue→QRectF meta-type converter.
         win.frameGeometry = {{ x: newX, y: newY, width: targetWidth, height: targetHeight }};
+        // KWin clamps to the app's declared minSize before applying; if the
+        // resulting size differs from what we asked, surface that to the user.
+        var actual = win.frameGeometry;
+        if (actual.width !== targetWidth || actual.height !== targetHeight) {{
+            callDBus("org.justright.tray", "/SizeOverlay",
+                     "", "showClamped",
+                     targetWidth, targetHeight,
+                     Math.round(actual.width), Math.round(actual.height));
+        }}
     }}
 
     function deferResize() {{
@@ -220,19 +229,17 @@ registerUserActionsMenu(function (win) {{
 // Geometry tooltip: show a size overlay whenever any window is resized.
 // Calls back to the tray app over DBus; the tray renders the overlay widget.
 // ---------------------------------------------------------------------------
-var _wsTooltipLastW = -1;
-var _wsTooltipLastH = -1;
 var _wsTooltipLastT = 0;
 
 function wsNotifySize(win) {{
     var geo = win.frameGeometry;
-    // Only fire when the *size* changes, not on plain moves.
-    if (geo.width === _wsTooltipLastW && geo.height === _wsTooltipLastH) return;
+    // Only fire when *this window's* size changes, not on plain moves.
+    if (geo.width === win._wsLastW && geo.height === win._wsLastH) return;
     // Throttle to ~15 fps so we don't hammer DBus on every pixel.
     var now = Date.now();
     if (now - _wsTooltipLastT < 66) return;
-    _wsTooltipLastW = geo.width;
-    _wsTooltipLastH = geo.height;
+    win._wsLastW = geo.width;
+    win._wsLastH = geo.height;
     _wsTooltipLastT = now;
     callDBus("org.justright.tray", "/SizeOverlay",
              "", "showSize",
@@ -241,6 +248,11 @@ function wsNotifySize(win) {{
 }}
 
 function wsConnectWindow(win) {{
+    // Seed the per-window size so the first frameGeometryChanged only fires
+    // if the size actually changes (not on the first plain move).
+    var geo = win.frameGeometry;
+    win._wsLastW = geo.width;
+    win._wsLastH = geo.height;
     win.frameGeometryChanged.connect(function() {{ wsNotifySize(win); }});
 }}
 

@@ -76,6 +76,13 @@ class TrayDBusService(QObject):
     def addCurrentSize(self, width, height):   # noqa: N802
         self._tray.prompt_add_preset(width, height)
 
+    @pyqtSlot(int, int, int, int)
+    def showClamped(self, requested_width, requested_height,   # noqa: N802
+                    actual_width, actual_height):
+        self._tray.show_clamped_overlay(
+            requested_width, requested_height, actual_width, actual_height
+        )
+
 
 # ---------------------------------------------------------------------------
 # Main tray class
@@ -146,6 +153,15 @@ class WindowSizerTray:
 
     def show_size_overlay(self, x, y, width, height):
         _call_osd("showText", _OSD_ICON, f"{width} × {height}")
+
+    def show_clamped_overlay(self, requested_width, requested_height,
+                             actual_width, actual_height):
+        _call_osd(
+            "showText",
+            _OSD_ICON,
+            f"App refused {requested_width} × {requested_height} "
+            f"(min {actual_width} × {actual_height})",
+        )
 
     def prompt_add_preset(self, width, height):
         """Show a small dialog so the user can name and save the current size."""
