@@ -2,6 +2,8 @@
 
 [![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/vastworks)
 
+![Just Right demo](demo.gif)
+
 A Sizer-style window resizer for **KDE Plasma on Wayland**. (Project folder is
 `window-sizer/`; the user-facing name is "Just Right".) Resize the active window to exact
 dimensions from a system-tray menu or a keyboard shortcut.
