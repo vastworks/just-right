@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Window Sizer tray app.
 
-Loads the KWin resize script on startup, then shows a system-tray menu listing
-every saved preset. Clicking a preset resizes the currently active window.
+Picks a window backend for the current desktop (KWin on KDE, wmctrl on X11),
+then shows a system-tray menu listing every saved preset. Clicking a preset
+resizes the currently active window.
 
-Also hosts the org.justright.tray DBus service used by the KWin script to:
-  - show the size overlay whenever any window is resized (showSize)
-  - prompt the user to save the active window's current size (addCurrentSize)
+On KDE it also hosts the org.justright.tray DBus service used by the KWin
+script to show the size overlay and the add-preset prompt. On X11 those
+callbacks are handled directly (no DBus round-trip), so the live drag overlay
+is simply absent there.
 """
 
 import sys
@@ -29,6 +31,7 @@ from PyQt6.QtWidgets import (
 )
 
 import sizer_engine
+from sizer_backend import select_backend
 from sizer_editor import PresetsEditor
 
 TRAY_ICON_NAMES = ["transform-scale", "view-fullscreen", "zoom-fit-best", "preferences-system-windows"]
@@ -42,6 +45,7 @@ _DBUS_PATH     = "/SizeOverlay"
 # Wayland doesn't let apps position their own windows freely, so a custom
 # floating widget always ends up on the wrong screen. KDE's OSD handles
 # Wayland output selection natively and looks like the volume/brightness HUD.
+# (KDE only — on X11 there is no KWin script firing these callbacks.)
 # ---------------------------------------------------------------------------
 
 _OSD_SERVICE   = "org.kde.plasmashell"
@@ -91,13 +95,24 @@ class TrayDBusService(QObject):
 class WindowSizerTray:
     def __init__(self, application):
         self.application = application
-        self.presets = sizer_engine.reload_kwin_script()
+        self.backend = select_backend()
+        self.presets = self.backend.activate()
 
+        # The DBus callback service is only meaningful for the KWin backend,
+        # which calls back into it. It's harmless to register on X11, but the
+        # KWin overlay/add-preset path only fires when a KWin script is loaded.
         self._dbus_service = TrayDBusService(self)
         bus = QDBusConnection.sessionBus()
         bus.registerService(_DBUS_SERVICE)
         bus.registerObject(_DBUS_PATH, self._dbus_service,
                            QDBusConnection.RegisterOption.ExportAllSlots)
+
+        # On X11 we render our own live drag-dimensions overlay (KDE uses the
+        # KWin script + Plasma OSD instead, driven via the DBus service above).
+        self._overlay = None
+        self._resize_watcher = None
+        if self.backend.name == "x11":
+            self._start_x11_overlay()
 
         self.tray_icon = QSystemTrayIcon(self._load_icon())
         self.tray_icon.setToolTip("Just Right")
@@ -105,6 +120,20 @@ class WindowSizerTray:
         self.tray_icon.setContextMenu(self.menu)
         self.rebuild_menu()
         self.tray_icon.show()
+
+    def _start_x11_overlay(self):
+        """Bring up the X11 live-resize overlay. Optional: if python-xlib is
+        missing, the tray still works, just without the drag dimensions box."""
+        try:
+            from sizer_overlay_x11 import DimensionsOverlay, ResizeWatcher
+        except ImportError as error:
+            print(
+                f"Live dimensions overlay disabled (install python3-xlib): {error}",
+                file=sys.stderr,
+            )
+            return
+        self._overlay = DimensionsOverlay()
+        self._resize_watcher = ResizeWatcher(self._overlay)
 
     def _load_icon(self):
         for icon_name in TRAY_ICON_NAMES:
@@ -117,11 +146,11 @@ class WindowSizerTray:
         self.menu.clear()
         for preset in self.presets:
             action = self.menu.addAction(sizer_engine.preset_label(preset))
-            # 150 ms delay lets the tray menu fully close before the DBus trigger
+            # 150 ms delay lets the tray menu fully close before the resize
             # fires — without it the active window would be the menu itself.
             action.triggered.connect(
                 lambda _checked, chosen=preset: QTimer.singleShot(
-                    150, lambda: sizer_engine.trigger_preset(chosen)
+                    150, lambda: self.backend.trigger_preset(chosen)
                 )
             )
 
@@ -129,27 +158,19 @@ class WindowSizerTray:
         self.menu.addAction("Add current window size…", self._trigger_add_current_size)
         self.menu.addSeparator()
         self.menu.addAction("Edit presets…", self.open_editor)
-        self.menu.addAction("Reload KWin script", self.reload_script)
+        self.menu.addAction("Reload backend", self.reload_script)
         self.menu.addSeparator()
         self.menu.addAction("Quit", self.application.quit)
 
     def _trigger_add_current_size(self):
-        """Ask the KWin script for the active window's current size.
+        """Read the active window's current size so it can be saved as a preset.
 
-        The 150 ms delay matches the preset-trigger delay — it gives the tray
-        menu time to close so the original window regains focus before the
-        KWin script reads workspace.activeWindow.
+        The 150 ms delay gives the tray menu time to close so the original
+        window regains focus before the backend reads the active window.
         """
-        QTimer.singleShot(
-            150,
-            lambda: sizer_engine.run_qdbus(
-                "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
-                "org.kde.kglobalaccel.Component.invokeShortcut",
-                "WindowSizer_AddCurrentSize",
-            ),
-        )
+        QTimer.singleShot(150, lambda: self.backend.add_current_size(self))
 
-    # -- callbacks from TrayDBusService --
+    # -- callbacks from TrayDBusService (KWin backend only) --
 
     def show_size_overlay(self, x, y, width, height):
         _call_osd("showText", _OSD_ICON, f"{width} × {height}")
@@ -208,7 +229,7 @@ class WindowSizerTray:
             self.reload_script()
 
     def reload_script(self):
-        self.presets = sizer_engine.reload_kwin_script()
+        self.presets = self.backend.activate()
         self.rebuild_menu()
 
 

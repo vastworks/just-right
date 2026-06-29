@@ -4,13 +4,18 @@
 
 ![Just Right demo](demo.gif)
 
-A Sizer-style window resizer for **KDE Plasma on Wayland**. (Project folder is
-`window-sizer/`; the user-facing name is "Just Right".) Resize the active window to exact
-dimensions from a system-tray menu or a keyboard shortcut.
+A Sizer-style window resizer for **KDE Plasma on Wayland**, with **beta support
+for X11 desktops** like Linux Mint / Cinnamon. (Project folder is `window-sizer/`;
+the user-facing name is "Just Right".) Resize the active window to exact dimensions
+from a system-tray menu or a keyboard shortcut.
 
-On Wayland, ordinary apps can't move or resize other apps' windows — only the
-compositor can. So the actual resizing is done by a tiny **KWin script**, and a
-**PyQt6 tray app** drives it. The two talk over DBus.
+On Wayland, ordinary apps can't move or resize other apps' windows; only the
+compositor can. So on KDE the actual resizing is done by a tiny **KWin script**,
+and a **PyQt6 tray app** drives it over DBus. On X11 the same tray drives a
+`wmctrl`-based backend directly. The tray auto-detects your desktop and picks
+the right backend at launch.
+
+> **See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.**
 
 ## What it does
 
@@ -20,7 +25,13 @@ compositor can. So the actual resizing is done by a tiny **KWin script**, and a
 - **Keyboard shortcuts (optional).** Every preset is also a KDE global action.
   Open *System Settings → Shortcuts*, search **"Window Sizer"**, and bind keys.
 - **Editable presets.** Add / edit / delete sizes in a small GUI.
-- **Size Popup** Size indicator appears whenever any window is resized
+- **Size popup.** A size indicator appears whenever a window is resized. On KDE
+  this uses the Plasma OSD; on X11 it is a floating, outlined readout that
+  follows the cursor while you drag.
+- **Runs on KDE and X11.** One tray app; it auto-detects the desktop and uses
+  the KWin backend on Plasma or the `wmctrl` backend on X11 (Mint / Cinnamon,
+  beta).
+
 ## Install
 
 ```bash
@@ -39,12 +50,28 @@ Start the tray immediately, without logging out:
 setsid python3 sizer_tray.py >/dev/null 2>&1 &
 ```
 
+### X11 desktops (Mint / Cinnamon, beta)
+
+On X11 the resizing is done with `wmctrl`, and the live size popup uses
+`python3-xlib`. Install those plus PyQt6:
+
+```bash
+sudo apt install wmctrl xdotool python3-xlib python3-pyqt6
+python3 sizer_tray.py
+```
+
+The tray detects X11 automatically and uses the `wmctrl` backend. Presets,
+centering, the "Add current window size" capture, and the live drag popup all
+work. See **Notes / limits** for what is KDE-only.
+
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `sizer_engine.py` | Shared logic: presets file, generates the KWin script, loads it, triggers presets over DBus |
-| `sizer_tray.py` | System-tray app — the menu of presets |
+| `sizer_engine.py` | Shared presets file plus the KDE/KWin backend: generates the KWin script, loads it, triggers presets over DBus |
+| `sizer_backend.py` | Picks a backend at launch (KWin on Plasma, `wmctrl` on X11) behind one interface |
+| `sizer_overlay_x11.py` | X11-only live drag-dimensions popup (event-driven via python-xlib) |
+| `sizer_tray.py` | System-tray app: the menu of presets |
 | `sizer_editor.py` | PyQt6 dialog to add/edit/delete presets (also runs standalone) |
 | `install.sh` | One-shot setup: deps, autostart, launcher |
 
@@ -74,8 +101,19 @@ monitor, so it works correctly across multiple displays.
 
 ## Notes / limits
 
-- KWin/Wayland only. The X11 tools `wmctrl`/`xdotool` can't see native Wayland
-  windows, which is why this exists.
 - A window that declares itself non-resizable is left alone.
-- If you change presets, the tray reloads the script automatically. If you edit
-  `presets.json` by hand, pick **Reload KWin script** from the tray menu.
+- If you change presets, the tray reloads automatically. If you edit
+  `presets.json` by hand, pick **Reload backend** from the tray menu.
+
+### X11 backend (beta)
+
+- **No built-in global shortcuts.** KDE registers each preset as a global
+  action; on X11 there is no equivalent yet. Bind a `wmctrl` command to a key in
+  *Cinnamon Settings, Keyboard, Shortcuts* if you want hotkeys.
+- **Live popup needs `python3-xlib`.** Without it the tray still works, just
+  with no drag readout.
+- **Reparenting window managers.** The live popup keys off the active window,
+  which assumes client-side decorations (true on Cinnamon). On window managers
+  with server-side frames the drag readout may not appear; presets still work.
+- The KWin/Wayland backend exists because on Wayland `wmctrl`/`xdotool` cannot
+  see or move native windows; only the compositor can.
