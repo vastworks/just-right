@@ -4,6 +4,23 @@ All notable changes to Just Right are listed here. Versions follow
 [semantic versioning](https://semver.org/): MINOR adds features without breaking
 existing behavior, PATCH is fixes only.
 
+## v1.4.0
+
+### What's new
+
+- **The menu stays open after picking a size.** Click size after size to preview
+  them on the active window without reopening the menu each time. This applies to
+  presets and ratio sizes; other items (Edit presets, Quit, ...) still close as
+  before.
+
+### Changed
+
+- **Ratio menu now offers standard resolutions.** Instead of screen-scaled steps
+  (which skipped familiar sizes), each ratio lists well-known resolutions that fit
+  your display, so 16:9 includes 1920x1080, 1600x900, 1280x720, and so on. A ratio
+  with no standard list, or a display too small for any standard size, falls back
+  to the previous screen-scaled ladder.
+
 ## v1.3.1
 
 ### Fixed

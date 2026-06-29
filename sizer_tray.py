@@ -35,6 +35,28 @@ from sizer_backend import select_backend
 from sizer_editor import PresetsEditor
 from sizer_ratios import RATIOS, ratio_label, sizes_for_ratio
 
+class StickyMenu(QMenu):
+    """A QMenu that stays open when you trigger a size action, so you can apply
+    several sizes in a row and compare them without reopening the menu.
+
+    Only actions marked with the dynamic property "keepMenuOpen" stay open;
+    everything else (Edit presets, Quit, submenu openers) behaves normally.
+    """
+
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.position().toPoint())
+        if (
+            action is not None
+            and action.isEnabled()
+            and action.menu() is None
+            and action.property("keepMenuOpen")
+        ):
+            action.trigger()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class RatioMenu(QMenu):
     """The 'Resize to ratio' submenu, with an Alt-to-flip trick.
 
@@ -85,11 +107,14 @@ class RatioMenu(QMenu):
         for ratio_width, ratio_height in RATIOS:
             if self._inverted:
                 ratio_width, ratio_height = ratio_height, ratio_width
-            submenu = self.addMenu(ratio_label(ratio_width, ratio_height))
+            submenu = StickyMenu(ratio_label(ratio_width, ratio_height), self)
+            self.addMenu(submenu)
             for width, height in sizes_for_ratio(
                 ratio_width, ratio_height, self._area.width(), self._area.height()
             ):
                 action = submenu.addAction(f"{width} × {height}")
+                # Keep the menu open so several sizes can be tried in a row.
+                action.setProperty("keepMenuOpen", True)
                 action.triggered.connect(
                     lambda _checked, w=width, h=height: self._on_pick(w, h)
                 )
@@ -179,7 +204,7 @@ class WindowSizerTray:
 
         self.tray_icon = QSystemTrayIcon(self._load_icon())
         self.tray_icon.setToolTip("Just Right")
-        self.menu = QMenu()
+        self.menu = StickyMenu()
         self.tray_icon.setContextMenu(self.menu)
         self.rebuild_menu()
         self.tray_icon.show()
@@ -227,8 +252,10 @@ class WindowSizerTray:
         self.menu.clear()
         for preset in self.presets:
             action = self.menu.addAction(sizer_engine.preset_label(preset))
-            # 150 ms delay lets the tray menu fully close before the resize
-            # fires — without it the active window would be the menu itself.
+            # Keep the menu open so several presets can be tried in a row.
+            action.setProperty("keepMenuOpen", True)
+            # 150 ms delay lets the click settle before the resize fires; the
+            # menu is a popup, so the window behind it stays the active one.
             action.triggered.connect(
                 lambda _checked, chosen=preset: QTimer.singleShot(
                     150, lambda: self.backend.trigger_preset(chosen)

@@ -11,7 +11,21 @@ This module is pure arithmetic so it can be unit-tested without a display.
 # Ratios offered in the menu, as (width, height). Editable.
 RATIOS = [(16, 9), (16, 10), (4, 3), (21, 9)]
 
-# Fractions of the largest fitting box to offer, biggest first.
+# Well-known sizes per ratio, biggest first, each an exact match for its ratio.
+# The menu shows the ones that fit the display, so common resolutions like
+# 1920x1080 appear by name instead of odd screen-scaled values.
+STANDARD_SIZES = {
+    (16, 9): [(3840, 2160), (2560, 1440), (1920, 1080), (1600, 900),
+              (1280, 720), (1024, 576)],
+    (16, 10): [(2560, 1600), (1920, 1200), (1680, 1050), (1440, 900),
+               (1280, 800)],
+    (4, 3): [(2048, 1536), (1920, 1440), (1600, 1200), (1400, 1050),
+             (1280, 960), (1024, 768), (800, 600)],
+    (21, 9): [(3360, 1440), (2520, 1080), (1680, 720), (1260, 540)],
+}
+
+# Fallback fractions, used only for a ratio with no standard list (or a display
+# too small for any standard size to fit).
 SCALE_STEPS = (1.0, 0.85, 0.70, 0.60, 0.50)
 
 
@@ -84,27 +98,49 @@ def stepped_size(ladder, current_width, direction):
         return min(ladder, key=lambda size: size[0])
 
 
-def sizes_for_ratio(
-    ratio_width, ratio_height, available_width, available_height, steps=SCALE_STEPS
-):
-    """Ladder of (width, height) sizes at this ratio, scaled to the screen.
+def _standard_sizes(ratio_width, ratio_height):
+    """The curated standard sizes for a ratio, in either orientation, or None.
 
-    Heights are scaled by each step and widths recomputed from the height so
-    every entry keeps the ratio. Duplicate and zero sizes are dropped.
-    """
+    Portrait ratios reuse their landscape list with width/height swapped, so
+    9:16 offers 1080x1920 where 16:9 offers 1920x1080."""
+    if (ratio_width, ratio_height) in STANDARD_SIZES:
+        return STANDARD_SIZES[(ratio_width, ratio_height)]
+    if (ratio_height, ratio_width) in STANDARD_SIZES:
+        return [(h, w) for w, h in STANDARD_SIZES[(ratio_height, ratio_width)]]
+    return None
+
+
+def _scaled_ladder(ratio_width, ratio_height, available_width, available_height):
+    """Fallback: scale the largest fitting box by SCALE_STEPS."""
     base_width, base_height = largest_fitting_size(
         ratio_width, ratio_height, available_width, available_height
     )
-
     sizes = []
     seen = set()
-    for step in steps:
+    for step in SCALE_STEPS:
         height = round(base_height * step)
         width = round(height * ratio_width / ratio_height)
-        if width <= 0 or height <= 0:
-            continue
-        if (width, height) in seen:
+        if width <= 0 or height <= 0 or (width, height) in seen:
             continue
         seen.add((width, height))
         sizes.append((width, height))
     return sizes
+
+
+def sizes_for_ratio(ratio_width, ratio_height, available_width, available_height):
+    """Sizes at this ratio to offer for the given display, biggest first.
+
+    Uses the curated standard sizes that fit the screen (so 16:9 includes
+    1920x1080). Falls back to a screen-scaled ladder for a ratio with no
+    standard list, or when the display is too small for any standard size.
+    """
+    standard = _standard_sizes(ratio_width, ratio_height)
+    if standard is not None:
+        fitting = [
+            (width, height)
+            for width, height in standard
+            if width <= available_width and height <= available_height
+        ]
+        if fitting:
+            return fitting
+    return _scaled_ladder(ratio_width, ratio_height, available_width, available_height)
