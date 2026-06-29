@@ -4,6 +4,15 @@ All notable changes to Just Right are listed here. Versions follow
 [semantic versioning](https://semver.org/): MINOR adds features without breaking
 existing behavior, PATCH is fixes only.
 
+## v1.3.1
+
+### Fixed
+
+- **Alt-to-flip portrait ratios not working.** The ratio menu tried to catch the
+  Alt key with key events, but QMenu reserves Alt for mnemonics and never
+  delivered them. It now polls the real keyboard state (queryKeyboardModifiers)
+  while the menu is open, so holding Alt flips the ratios to portrait reliably.
+
 ## v1.3.0
 
 ### What's new

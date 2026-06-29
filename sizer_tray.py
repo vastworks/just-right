@@ -49,7 +49,30 @@ class RatioMenu(QMenu):
         self._area = area
         self._on_pick = on_pick
         self._inverted = False
-        self.aboutToShow.connect(self._rebuild)
+
+        # QMenu swallows the Alt key (it is reserved for mnemonics), so we can't
+        # rely on key events. Instead, while the menu is open, poll the real
+        # keyboard state a few times a second and flip when Alt changes.
+        self._alt_timer = QTimer(self)
+        self._alt_timer.setInterval(60)
+        self._alt_timer.timeout.connect(self._poll_alt)
+        self.aboutToShow.connect(self._on_show)
+        self.aboutToHide.connect(self._alt_timer.stop)
+
+    def _on_show(self):
+        self._inverted = self._alt_is_held()
+        self._rebuild()
+        self._alt_timer.start()
+
+    def _alt_is_held(self):
+        modifiers = QApplication.queryKeyboardModifiers()
+        return bool(modifiers & Qt.KeyboardModifier.AltModifier)
+
+    def _poll_alt(self):
+        held = self._alt_is_held()
+        if held != self._inverted:
+            self._inverted = held
+            self._rebuild()
 
     def _rebuild(self):
         self.clear()
@@ -70,22 +93,6 @@ class RatioMenu(QMenu):
                 action.triggered.connect(
                     lambda _checked, w=width, h=height: self._on_pick(w, h)
                 )
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Alt and not self._inverted:
-            self._inverted = True
-            self._rebuild()
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key.Key_Alt and self._inverted:
-            self._inverted = False
-            self._rebuild()
-            event.accept()
-            return
-        super().keyReleaseEvent(event)
 
 
 TRAY_ICON_NAMES = ["transform-scale", "view-fullscreen", "zoom-fit-best", "preferences-system-windows"]
