@@ -33,6 +33,60 @@ from PyQt6.QtWidgets import (
 import sizer_engine
 from sizer_backend import select_backend
 from sizer_editor import PresetsEditor
+from sizer_ratios import RATIOS, ratio_label, sizes_for_ratio
+
+class RatioMenu(QMenu):
+    """The 'Resize to ratio' submenu, with an Alt-to-flip trick.
+
+    Normally it lists the landscape ratios. While the menu is open and Alt is
+    held, it rebuilds itself showing each ratio's portrait inverse (16:9 -> 9:16),
+    so a pivoted monitor is one keypress away without cluttering the menu. This
+    mirrors the macOS pattern of holding a modifier to reveal alternate items.
+    """
+
+    def __init__(self, area, on_pick, parent=None):
+        super().__init__("Resize to ratio", parent)
+        self._area = area
+        self._on_pick = on_pick
+        self._inverted = False
+        self.aboutToShow.connect(self._rebuild)
+
+    def _rebuild(self):
+        self.clear()
+        hint = self.addAction(
+            "Portrait (release Alt)" if self._inverted else "Hold Alt for portrait"
+        )
+        hint.setEnabled(False)
+        self.addSeparator()
+
+        for ratio_width, ratio_height in RATIOS:
+            if self._inverted:
+                ratio_width, ratio_height = ratio_height, ratio_width
+            submenu = self.addMenu(ratio_label(ratio_width, ratio_height))
+            for width, height in sizes_for_ratio(
+                ratio_width, ratio_height, self._area.width(), self._area.height()
+            ):
+                action = submenu.addAction(f"{width} × {height}")
+                action.triggered.connect(
+                    lambda _checked, w=width, h=height: self._on_pick(w, h)
+                )
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Alt and not self._inverted:
+            self._inverted = True
+            self._rebuild()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key.Key_Alt and self._inverted:
+            self._inverted = False
+            self._rebuild()
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
 
 TRAY_ICON_NAMES = ["transform-scale", "view-fullscreen", "zoom-fit-best", "preferences-system-windows"]
 _INSTANCE_KEY = "just-right-window-sizer"
@@ -45,7 +99,7 @@ _DBUS_PATH     = "/SizeOverlay"
 # Wayland doesn't let apps position their own windows freely, so a custom
 # floating widget always ends up on the wrong screen. KDE's OSD handles
 # Wayland output selection natively and looks like the volume/brightness HUD.
-# (KDE only — on X11 there is no KWin script firing these callbacks.)
+# (KDE only; on X11 there is no KWin script firing these callbacks.)
 # ---------------------------------------------------------------------------
 
 _OSD_SERVICE   = "org.kde.plasmashell"
@@ -111,8 +165,10 @@ class WindowSizerTray:
         # KWin script + Plasma OSD instead, driven via the DBus service above).
         self._overlay = None
         self._resize_watcher = None
+        self._scroll_resizer = None
         if self.backend.name == "x11":
             self._start_x11_overlay()
+            self._start_x11_scroll_resize()
 
         self.tray_icon = QSystemTrayIcon(self._load_icon())
         self.tray_icon.setToolTip("Just Right")
@@ -135,6 +191,24 @@ class WindowSizerTray:
         self._overlay = DimensionsOverlay()
         self._resize_watcher = ResizeWatcher(self._overlay)
 
+    def _start_x11_scroll_resize(self):
+        """Enable Super+scroll to step the active window through its ratio
+        ladder. Optional: needs python-xlib, and skips quietly if the
+        modifier+wheel combo is already claimed by another app."""
+        try:
+            from sizer_scroll_x11 import ScrollResizer
+        except ImportError as error:
+            print(f"Scroll-to-resize disabled (install python3-xlib): {error}",
+                  file=sys.stderr)
+            return
+        resizer = ScrollResizer(self.backend)
+        if resizer.grab_failed:
+            print("Scroll-to-resize disabled: Super+wheel is already in use by "
+                  "another app. Change the modifier in sizer_scroll_x11.py.",
+                  file=sys.stderr)
+            return
+        self._scroll_resizer = resizer
+
     def _load_icon(self):
         for icon_name in TRAY_ICON_NAMES:
             icon = QIcon.fromTheme(icon_name)
@@ -155,12 +229,26 @@ class WindowSizerTray:
             )
 
         self.menu.addSeparator()
+        self._add_ratio_menu()
+        self.menu.addSeparator()
         self.menu.addAction("Add current window size…", self._trigger_add_current_size)
         self.menu.addSeparator()
         self.menu.addAction("Edit presets…", self.open_editor)
         self.menu.addAction("Reload backend", self.reload_script)
         self.menu.addSeparator()
         self.menu.addAction("Quit", self.application.quit)
+
+    def _add_ratio_menu(self):
+        """Add the 'Resize to ratio' submenu. Holding Alt while it is open flips
+        every ratio to its portrait inverse (16:9 -> 9:16) for pivoted monitors.
+        Clicking a size resizes and centers the active window."""
+        area = self.application.primaryScreen().availableGeometry()
+        self.menu.addMenu(RatioMenu(area, self._apply_ratio_size, self.menu))
+
+    def _apply_ratio_size(self, width, height):
+        # 150 ms delay lets the menu close so the user's window, not the menu,
+        # is the active window when the resize fires.
+        QTimer.singleShot(150, lambda: self.backend.apply_size(width, height, "center"))
 
     def _trigger_add_current_size(self):
         """Read the active window's current size so it can be saved as a preset.

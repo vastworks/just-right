@@ -1,6 +1,6 @@
 """Live drag-dimensions overlay for X11 desktops.
 
-On X11 — unlike Wayland — an app may freely position its own top-level
+On X11, unlike Wayland, an app may freely position its own top-level
 windows, so we can show a small floating "W x H" box right next to the
 window being resized, exactly like Sizer on Windows.
 
@@ -9,7 +9,7 @@ How it works:
     top-level window (SubstructureNotifyMask on the root window).
   - Those notifications arrive as ConfigureNotify events on the display's
     socket. A QSocketNotifier wakes us whenever that socket is readable, so
-    this is fully event-driven — no polling loop, no extra thread.
+    this is fully event-driven, with no polling loop and no extra thread.
   - When a window's *size* (not just position) changes, we show the overlay
     near the cursor and arm a short timer to hide it once dragging stops.
 
@@ -53,8 +53,8 @@ _PLATE_RADIUS = 6
 class DimensionsOverlay(QWidget):
     """A small frameless box that shows the current window size.
 
-    The text is drawn as an outlined glyph path — a thick black stroke with a
-    white fill — so the numbers stay legible against any window or wallpaper.
+    The text is drawn as an outlined glyph path (a thick black stroke with a
+    white fill) so the numbers stay legible against any window or wallpaper.
     """
 
     def __init__(self):

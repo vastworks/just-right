@@ -4,6 +4,31 @@ All notable changes to Just Right are listed here. Versions follow
 [semantic versioning](https://semver.org/): MINOR adds features without breaking
 existing behavior, PATCH is fixes only.
 
+## v1.3.0
+
+### What's new
+
+- **Aspect-ratio scaler.** A new "Resize to ratio" tray submenu offers, for each
+  ratio (16:9, 16:10, 4:3, 21:9), a ladder of sizes scaled to fit the window's
+  display. Pick one to resize and center the active window.
+- **Portrait ratios for pivoted monitors.** Hold Alt while the ratio menu is open
+  to flip every ratio to its inverse (16:9 becomes 9:16, and so on), without a
+  separate cluttered submenu.
+- **Super + scroll wheel to resize (X11).** Hold Super and scroll the wheel over a
+  window to step it through the size ladder for its current aspect ratio: scroll
+  up grows it, scroll down shrinks it. It keeps the window's ratio and
+  orientation, so a portrait window steps through portrait sizes. The size popup
+  shows each step. If Super+wheel is already taken by another app, the feature
+  disables itself quietly; change the modifier in `sizer_scroll_x11.py`.
+
+### Notes
+
+- The ratio scaler works on KDE and X11. Super+scroll is X11 only, since the
+  KWin/Wayland session cannot grab a modifier plus the wheel globally.
+- New files: `sizer_ratios.py` (size-ladder math), `sizer_scroll_x11.py` (the
+  scroll grab). KDE's ad-hoc resize uses a one-shot KWin script in
+  `sizer_engine.py`.
+
 ## v1.2.1
 
 ### Fixed

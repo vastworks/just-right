@@ -16,7 +16,7 @@ Both expose the same three methods so the tray never has to branch:
     backend.trigger_preset(preset)
     backend.add_current_size(tray)
 
-Preset storage stays in sizer_engine for both backends — a single source of
+Preset storage stays in sizer_engine for both backends, a single source of
 truth for presets.json.
 """
 
@@ -29,7 +29,7 @@ import sizer_engine
 
 
 # ---------------------------------------------------------------------------
-# KWin backend (KDE Plasma) — thin wrapper over the existing engine.
+# KWin backend (KDE Plasma): thin wrapper over the existing engine.
 # ---------------------------------------------------------------------------
 
 class KWinBackend:
@@ -43,11 +43,15 @@ class KWinBackend:
         """Resize the active window by firing the preset's kglobalaccel action."""
         return sizer_engine.trigger_preset(preset)
 
+    def apply_size(self, width, height, position="center"):
+        """Resize the active window to an ad-hoc size (used by the ratio scaler)."""
+        sizer_engine.apply_size_kwin(width, height, position)
+
     def add_current_size(self, tray):
         """Ask the KWin script for the active window's size.
 
         The script reads workspace.activeWindow and calls back into the tray's
-        DBus service (addCurrentSize), which opens the save-preset dialog — so
+        DBus service (addCurrentSize), which opens the save-preset dialog, so
         nothing to return here.
         """
         sizer_engine.run_qdbus(
@@ -58,7 +62,7 @@ class KWinBackend:
 
 
 # ---------------------------------------------------------------------------
-# X11 backend (Cinnamon / Mint) — direct window manipulation via wmctrl.
+# X11 backend (Cinnamon / Mint): direct window manipulation via wmctrl.
 # ---------------------------------------------------------------------------
 
 class X11Backend:
@@ -70,14 +74,17 @@ class X11Backend:
 
     def trigger_preset(self, preset):
         """Resize the active window to the preset, honoring its position mode."""
-        width = int(preset["width"])
-        height = int(preset["height"])
-        position = preset.get("position", "keep")
+        self.apply_size(
+            int(preset["width"]),
+            int(preset["height"]),
+            preset.get("position", "keep"),
+        )
 
+    def apply_size(self, width, height, position="center"):
+        """Resize the active window to an ad-hoc size (used by the ratio scaler)."""
         left, top = None, None
         if position == "center":
             left, top = self._centered_position(width, height)
-
         self._apply_size(width, height, left, top)
 
     def add_current_size(self, tray):
@@ -85,6 +92,25 @@ class X11Backend:
         geometry = self._active_window_geometry()
         if geometry is not None:
             tray.prompt_add_preset(geometry["width"], geometry["height"])
+
+    def active_window_geometry(self):
+        """Public accessor for the active window's geometry (or None)."""
+        return self._active_window_geometry()
+
+    def active_window_monitor_size(self):
+        """(width, height) of the monitor the active window is on, or None.
+
+        Used to build a ratio ladder that fits the right display on multi-monitor
+        setups, rather than always the primary screen."""
+        geometry = self._active_window_geometry()
+        if geometry is None:
+            return None
+        center_x = geometry["left"] + geometry["width"] // 2
+        center_y = geometry["top"] + geometry["height"] // 2
+        monitor = self._monitor_containing(center_x, center_y)
+        if monitor is None:
+            return None
+        return monitor["width"], monitor["height"]
 
     # -- internals --
 
@@ -105,8 +131,8 @@ class X11Backend:
 
     def _centered_position(self, width, height):
         """Top-left coords that center a width x height window on the monitor
-        the active window currently sits on. Falls back to (None, None) — i.e.
-        keep position — if we can't work out the monitor layout."""
+        the active window currently sits on. Falls back to (None, None), i.e.
+        keep position, if we can't work out the monitor layout."""
         window = self._active_window_geometry()
         if window is None:
             return None, None
@@ -137,7 +163,7 @@ class X11Backend:
 
     def _list_monitors(self):
         """Parse monitor rectangles from xrandr. Each --listmonitors line looks
-        like:  ' 0: +*HDMI-0 2560/598x1440/336+0+0  HDMI-0' — the token we want
+        like:  ' 0: +*HDMI-0 2560/598x1440/336+0+0  HDMI-0'. The token we want
         is the WIDTH/mmx HEIGHT/mm+X+Y geometry."""
         if shutil.which("xrandr") is None:
             return []
