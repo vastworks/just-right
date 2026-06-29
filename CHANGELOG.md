@@ -4,6 +4,16 @@ All notable changes to Just Right are listed here. Versions follow
 [semantic versioning](https://semver.org/): MINOR adds features without breaking
 existing behavior, PATCH is fixes only.
 
+## v1.2.1
+
+### Fixed
+
+- **X11 drag popup not appearing.** The live size popup filtered by the active
+  window, but on Cinnamon grabbing a window's resize border does not make it the
+  active window, so the popup never showed. It now keys off the window under the
+  mouse pointer, which is the one actually being dragged. This also cleanly
+  excludes the overlay itself, tooltips, and panels.
+
 ## v1.2.0
 
 ### What's new

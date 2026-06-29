@@ -134,19 +134,19 @@ class DimensionsOverlay(QWidget):
 
 
 class ResizeWatcher(QObject):
-    """Watches the active window for size changes and drives the overlay.
+    """Watches top-level windows for size changes and drives the overlay.
 
     Hook it into the Qt event loop by simply constructing it; the
     QSocketNotifier does the rest. Keep a reference alive for the life of the
     app (the tray stores it on itself).
 
-    We only react to resizes of the *active* window — the one the user is
-    dragging. That single filter does a lot of work: it ignores our own
-    overlay window, tooltips, menus, and background windows, all of which
-    would otherwise produce ConfigureNotify noise (and the overlay could even
-    feed back on itself). On Cinnamon/Mint each top-level client is a direct
-    child of root (client-side decorations, no separate frame window), so the
-    id reported by ConfigureNotify matches _NET_ACTIVE_WINDOW directly.
+    We react only to size changes of the window currently under the mouse
+    pointer, i.e. the one you are dragging. That filter does a lot of work: it
+    ignores our own overlay window, tooltips, menus, and background windows,
+    all of which produce ConfigureNotify noise (the overlay could even feed
+    back on itself). Note we deliberately do NOT key off _NET_ACTIVE_WINDOW:
+    on Cinnamon, grabbing a window's resize border does not make it the active
+    window, so that test wrongly rejected the very window being resized.
     """
 
     def __init__(self, overlay, parent=None):
@@ -156,27 +156,19 @@ class ResizeWatcher(QObject):
 
         self._display = display.Display()
         self._root = self._display.screen().root
-        self._net_active_atom = self._display.intern_atom("_NET_ACTIVE_WINDOW")
 
         # SubstructureNotify: geometry changes of root's children (the windows).
-        # PropertyChange: so we learn when _NET_ACTIVE_WINDOW changes.
-        self._root.change_attributes(
-            event_mask=X.SubstructureNotifyMask | X.PropertyChangeMask
-        )
+        self._root.change_attributes(event_mask=X.SubstructureNotifyMask)
         self._display.flush()
-        self._active_window_id = self._query_active_window()
+
+        # The overlay's own X window, so we never react to it resizing itself.
+        self._overlay_window_id = int(overlay.winId())
 
         # Wake _drain() whenever the X connection has events waiting.
         self._notifier = QSocketNotifier(
             self._display.fileno(), QSocketNotifier.Type.Read, self
         )
         self._notifier.activated.connect(self._drain)
-
-    def _query_active_window(self):
-        prop = self._root.get_full_property(self._net_active_atom, X.AnyPropertyType)
-        if prop and prop.value:
-            return int(prop.value[0])
-        return None
 
     def _drain(self):
         # Read every event currently buffered, then return to the Qt loop.
@@ -186,21 +178,38 @@ class ResizeWatcher(QObject):
                 self._on_configure(event)
             elif event.type == X.DestroyNotify:
                 self._last_size.pop(event.window.id, None)
-            elif event.type == X.PropertyNotify and event.atom == self._net_active_atom:
-                self._active_window_id = self._query_active_window()
+
+    def _window_under_pointer(self):
+        """Id of the root-level window the mouse is currently over, or None.
+
+        query_pointer reports the child of root containing the pointer; with
+        client-side decorations (Cinnamon) that is the window itself, which is
+        what ConfigureNotify reports too.
+        """
+        try:
+            child = self._root.query_pointer().child
+        except Exception:
+            return None
+        if child is None or child == 0:
+            return None
+        return child.id
 
     def _on_configure(self, event):
         window_id = event.window.id
-        if window_id != self._active_window_id:
+        if window_id == self._overlay_window_id:
             return
 
         size = (event.width, event.height)
         previous = self._last_size.get(window_id)
         self._last_size[window_id] = size
 
-        # Skip the first sighting after focus (so we don't pop on plain focus)
-        # and any event where only the position changed — size only.
+        # Only the size (not a plain move), and skip the first sighting so we
+        # don't pop when a window first appears.
         if previous is None or previous == size:
+            return
+
+        # Only the window being dragged, i.e. the one under the pointer.
+        if window_id != self._window_under_pointer():
             return
 
         self._overlay.show_dimensions(width=size[0], height=size[1])
