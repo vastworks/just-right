@@ -23,7 +23,7 @@ the right backend at launch.
   snaps to that size. Each preset can optionally re-center the window on its
   current monitor.
 - **Keyboard shortcuts (optional).** Every preset is also a KDE global action.
-  Open *System Settings → Shortcuts*, search **"Window Sizer"**, and bind keys.
+  Open *System Settings → Keyboard → Shortcuts*, search **"Just Right"** (under "Window Management"), and bind keys.
 - **Aspect-ratio scaler.** A "Resize to ratio" menu offers a ladder of sizes per
   ratio (16:9, 4:3, ...), scaled to fit your display. Hold Alt to flip them to
   portrait (9:16, ...) for a pivoted monitor.
