@@ -109,6 +109,11 @@ category keep their flat menu position. `sizeMode` is `"outer"` (the default) or
 `clientGeometry`; it is not a promise of an application's semantic game/web
 viewport and falls back to outer sizing on X11.
 
+The preset model derives `aspectRatio` from its width and height (for example,
+`1280×720` becomes `[16, 9]`) when generating KWin menu/action data. This avoids
+duplicating ratio metadata that could drift when a preset is edited; `category`
+remains the user-controlled menu grouping.
+
 When you select a saved preset, Just Right remembers it for that application and
 offers it as **Last used** in the tray menu next time. It never automatically
 resizes a newly opened window. On Plasma it identifies apps by desktop file name

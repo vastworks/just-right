@@ -35,6 +35,12 @@ class SizerEngineTests(unittest.TestCase):
         self.assertTrue(all(item["category"] == "Developer sizes" for item in templates))
         self.assertTrue(all(item["position"] == "center" for item in templates))
 
+    def test_preset_aspect_ratio_is_derived(self):
+        self.assertEqual(
+            sizer_engine.preset_aspect_ratio({"width": 1280, "height": 720}),
+            (16, 9),
+        )
+
     def test_generated_script_contains_client_and_fit_actions(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "window-sizer.js"
@@ -46,6 +52,7 @@ class SizerEngineTests(unittest.TestCase):
                 ])
             source = path.read_text(encoding="utf-8")
         self.assertIn('"sizeMode": "client"', source)
+        self.assertIn('"aspectRatio": [16, 9]', source)
         self.assertIn("win.clientGeometry", source)
         self.assertIn("WindowSizer_FitRatio_", source)
 

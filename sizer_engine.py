@@ -252,6 +252,11 @@ def add_custom_ratio(width, height):
     return save_custom_ratios(load_custom_ratios() + [ratio])
 
 
+def preset_aspect_ratio(preset):
+    """Derive a preset's reduced aspect ratio instead of duplicating it in JSON."""
+    return normalize_ratio(preset.get("width"), preset.get("height"))
+
+
 def developer_preset_templates():
     """Return fresh developer-size preset definitions for the editor."""
     return [
@@ -272,6 +277,7 @@ def generate_script(presets):
             "height": int(preset["height"]),
             "position": preset.get("position", "keep"),
             "sizeMode": preset.get("sizeMode", "outer"),
+            "aspectRatio": list(preset_aspect_ratio(preset) or ()),
             "category": preset_category(preset),
             "identifier": preset["identifier"],
         }
