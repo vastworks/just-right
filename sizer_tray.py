@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QSpinBox,
     QSystemTrayIcon,
     QVBoxLayout,
 )
@@ -66,10 +67,12 @@ class RatioMenu(QMenu):
     mirrors the macOS pattern of holding a modifier to reveal alternate items.
     """
 
-    def __init__(self, area, on_pick, parent=None):
+    def __init__(self, area, on_pick, ratios, on_custom, parent=None):
         super().__init__("Resize to ratio", parent)
         self._area = area
         self._on_pick = on_pick
+        self._ratios = ratios
+        self._on_custom = on_custom
         self._inverted = False
 
         # QMenu swallows the Alt key (it is reserved for mnemonics), so we can't
@@ -94,6 +97,14 @@ class RatioMenu(QMenu):
         if self.isVisible():
             self._rebuild()
 
+    def set_ratios(self, ratios):
+        """Replace the ratio list after the user saves a custom ratio."""
+        if ratios == self._ratios:
+            return
+        self._ratios = ratios
+        if self.isVisible():
+            self._rebuild()
+
     def _alt_is_held(self):
         modifiers = QApplication.queryKeyboardModifiers()
         return bool(modifiers & Qt.KeyboardModifier.AltModifier)
@@ -112,7 +123,7 @@ class RatioMenu(QMenu):
         hint.setEnabled(False)
         self.addSeparator()
 
-        for ratio_width, ratio_height in RATIOS:
+        for ratio_width, ratio_height in self._ratios:
             if self._inverted:
                 ratio_width, ratio_height = ratio_height, ratio_width
             submenu = StickyMenu(ratio_label(ratio_width, ratio_height), self)
@@ -135,6 +146,8 @@ class RatioMenu(QMenu):
                 action.triggered.connect(
                     lambda _checked, w=width, h=height: self._on_pick(w, h)
                 )
+        self.addSeparator()
+        self.addAction("Custom ratio…", self._on_custom)
 
 
 TRAY_ICON_NAMES = ["transform-scale", "view-fullscreen", "zoom-fit-best", "preferences-system-windows"]
@@ -239,6 +252,7 @@ class WindowSizerTray:
         self.tray_icon.setToolTip("Just Right")
         self.menu = StickyMenu()
         self._active_app_identity = None
+        self._ratio_values = self._all_ratios()
         self._output_name = ""
         self._output_scale = 1.0
         self._scale_action = None
@@ -339,8 +353,48 @@ class WindowSizerTray:
         Clicking a size resizes and centers the active window. Each ratio also
         has a fit-work-area action for the largest available rectangle."""
         area = self.application.primaryScreen().availableGeometry()
-        self._ratio_menu = RatioMenu(area, self._apply_ratio_size, self.menu)
+        self._ratio_menu = RatioMenu(
+            area, self._apply_ratio_size, self._ratio_values,
+            self._add_custom_ratio, self.menu,
+        )
         self.menu.addMenu(self._ratio_menu)
+
+    def _all_ratios(self):
+        """Default ratios followed by user-created pairs, without duplicates."""
+        ratios = list(RATIOS)
+        for ratio in sizer_engine.load_custom_ratios():
+            if ratio not in ratios:
+                ratios.append(ratio)
+        return ratios
+
+    def _add_custom_ratio(self):
+        """Prompt for a persistent custom width:height ratio."""
+        dialog = QDialog()
+        dialog.setWindowTitle("Custom aspect ratio")
+        width_box = QSpinBox(dialog)
+        height_box = QSpinBox(dialog)
+        for box, value in ((width_box, 16), (height_box, 9)):
+            box.setRange(1, 9999)
+            box.setValue(value)
+        form = QFormLayout()
+        form.addRow("Width:", width_box)
+        form.addRow("Height:", height_box)
+        save_button = QPushButton("Add", dialog)
+        save_button.setDefault(True)
+        cancel_button = QPushButton("Cancel", dialog)
+        save_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(save_button)
+        layout = QVBoxLayout(dialog)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+        if dialog.exec():
+            sizer_engine.add_custom_ratio(width_box.value(), height_box.value())
+            self._ratio_values = self._all_ratios()
+            self._ratio_menu.set_ratios(self._ratio_values)
 
     def _request_active_context(self):
         """Refresh ratio geometry and application identity from the backend."""

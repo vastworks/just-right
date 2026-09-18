@@ -6,6 +6,7 @@ app and the presets editor import from here so there is a single source of truth
 """
 
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 CONFIG_DIRECTORY = Path.home() / ".config" / "window-sizer"
 PRESETS_PATH = CONFIG_DIRECTORY / "presets.json"
 APP_PRESETS_PATH = CONFIG_DIRECTORY / "app-presets.json"
+CUSTOM_RATIOS_PATH = CONFIG_DIRECTORY / "custom-ratios.json"
 GENERATED_SCRIPT_PATH = CONFIG_DIRECTORY / "window-sizer.js"
 
 # Name KWin/kglobalaccel uses to identify this loaded script.
@@ -175,6 +177,69 @@ def remember_app_preset(identity_type, identity_value, preset_identifier):
 def remembered_preset_identifier(identity_type, identity_value):
     entry = load_app_presets().get(app_identity_key(identity_type, identity_value), {})
     return entry.get("presetIdentifier") if isinstance(entry, dict) else None
+
+
+def normalize_ratio(width, height):
+    """Return a reduced positive ratio pair, or ``None`` for invalid input."""
+    try:
+        width, height = int(width), int(height)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    divisor = math.gcd(width, height)
+    return width // divisor, height // divisor
+
+
+def load_custom_ratios():
+    """Load user-created ratio pairs without coupling them to preset storage."""
+    if not CUSTOM_RATIOS_PATH.exists():
+        return []
+    try:
+        with open(CUSTOM_RATIOS_PATH, "r", encoding="utf-8") as ratios_file:
+            raw_ratios = json.load(ratios_file)
+    except (json.JSONDecodeError, OSError, ValueError):
+        return []
+    if not isinstance(raw_ratios, list):
+        return []
+    normalized = []
+    for item in raw_ratios:
+        if isinstance(item, dict):
+            ratio = normalize_ratio(item.get("width"), item.get("height"))
+        elif isinstance(item, list) and len(item) == 2:
+            ratio = normalize_ratio(item[0], item[1])
+        else:
+            ratio = None
+        if ratio is not None and ratio not in normalized:
+            normalized.append(ratio)
+    return normalized
+
+
+def save_custom_ratios(ratios):
+    """Persist normalized custom ratios atomically."""
+    normalized = []
+    for width, height in ratios:
+        ratio = normalize_ratio(width, height)
+        if ratio is not None and ratio not in normalized:
+            normalized.append(ratio)
+    CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    tmp_path = CUSTOM_RATIOS_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as ratios_file:
+        json.dump(
+            [{"width": width, "height": height} for width, height in normalized],
+            ratios_file,
+            indent=2,
+        )
+    tmp_path.replace(CUSTOM_RATIOS_PATH)
+    return normalized
+
+
+def add_custom_ratio(width, height):
+    """Add one custom ratio, returning the complete normalized list."""
+    ratio = normalize_ratio(width, height)
+    if ratio is None:
+        raise ValueError("ratio dimensions must be positive whole numbers")
+    return save_custom_ratios(load_custom_ratios() + [ratio])
 
 
 def generate_script(presets):

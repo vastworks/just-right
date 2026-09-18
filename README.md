@@ -27,6 +27,7 @@ the right backend at launch.
 - **Aspect-ratio scaler.** A "Resize to ratio" menu offers a ladder of sizes per
   ratio (16:9, 4:3, ...), scaled to fit the active window's usable display area.
   Each ratio has a **Fit work area** action for the largest fitting rectangle.
+  Use **Custom ratio…** to add arbitrary ratios such as 32:9, 5:4, 1:1, or 9:16.
   Hold Alt to flip them to
   portrait (9:16, ...) for a pivoted monitor.
 - **Super + scroll to resize (X11).** Hold Super and scroll the wheel over a
@@ -87,6 +88,7 @@ work. See **Notes / limits** for what is KDE-only.
 
 - Presets: `~/.config/window-sizer/presets.json`
 - Remembered per-application presets: `~/.config/window-sizer/app-presets.json`
+- Custom ratios: `~/.config/window-sizer/custom-ratios.json`
 - Generated KWin script: `~/.config/window-sizer/window-sizer.js`
 
 Each preset is `{ "name", "width", "height", "position", "identifier", "category", "sizeMode" }`, where

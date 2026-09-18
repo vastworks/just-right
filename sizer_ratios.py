@@ -9,7 +9,7 @@ This module is pure arithmetic so it can be unit-tested without a display.
 """
 
 # Ratios offered in the menu, as (width, height). Editable.
-RATIOS = [(16, 9), (16, 10), (4, 3), (21, 9)]
+RATIOS = [(16, 9), (16, 10), (4, 3), (3, 2), (21, 9)]
 
 # Well-known sizes per ratio, biggest first, each an exact match for its ratio.
 # The menu shows the ones that fit the display, so common resolutions like
@@ -21,6 +21,8 @@ STANDARD_SIZES = {
                (1280, 800)],
     (4, 3): [(2048, 1536), (1920, 1440), (1600, 1200), (1400, 1050),
              (1280, 960), (1024, 768), (800, 600)],
+    (3, 2): [(3000, 2000), (2400, 1600), (1800, 1200), (1500, 1000),
+             (1200, 800)],
     (21, 9): [(3360, 1440), (2520, 1080), (1680, 720), (1260, 540)],
 }
 
