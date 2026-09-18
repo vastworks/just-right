@@ -88,11 +88,14 @@ work. See **Notes / limits** for what is KDE-only.
 - Remembered per-application presets: `~/.config/window-sizer/app-presets.json`
 - Generated KWin script: `~/.config/window-sizer/window-sizer.js`
 
-Each preset is `{ "name", "width", "height", "position", "identifier", "category" }`, where
+Each preset is `{ "name", "width", "height", "position", "identifier", "category", "sizeMode" }`, where
 `position` is `"keep"` or `"center"`. The `identifier` is stable across renames
 so any keyboard shortcut you assign stays bound. `category` is optional; presets
 in the same category appear together in a submenu, while existing presets with no
-category keep their flat menu position.
+category keep their flat menu position. `sizeMode` is `"outer"` (the default) or
+`"client"`. Client mode is a KWin-only one-shot conversion using KWin's
+`clientGeometry`; it is not a promise of an application's semantic game/web
+viewport and falls back to outer sizing on X11.
 
 When you select a saved preset, Just Right remembers it for that application and
 offers it as **Last used** in the tray menu next time. It never automatically

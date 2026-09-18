@@ -32,8 +32,10 @@ class PresetsEditor(QDialog):
         # Keep the original identifiers so saved keyboard shortcuts stay bound.
         self._row_identifiers = [preset["identifier"] for preset in presets]
 
-        self.table = QTableWidget(len(presets), 5, self)
-        self.table.setHorizontalHeaderLabels(["Name", "Width", "Height", "Position", "Category"])
+        self.table = QTableWidget(len(presets), 6, self)
+        self.table.setHorizontalHeaderLabels(
+            ["Name", "Width", "Height", "Position", "Sizing", "Category"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
 
         for row_index, preset in enumerate(presets):
@@ -72,7 +74,13 @@ class PresetsEditor(QDialog):
         if current_position in sizer_engine.VALID_POSITIONS:
             position_box.setCurrentText(current_position)
         self.table.setCellWidget(row_index, 3, position_box)
-        self.table.setItem(row_index, 4, QTableWidgetItem(str(preset.get("category", ""))))
+        size_mode_box = QComboBox()
+        size_mode_box.addItems(sizer_engine.VALID_SIZE_MODES)
+        current_size_mode = preset.get("sizeMode", "outer")
+        if current_size_mode in sizer_engine.VALID_SIZE_MODES:
+            size_mode_box.setCurrentText(current_size_mode)
+        self.table.setCellWidget(row_index, 4, size_mode_box)
+        self.table.setItem(row_index, 5, QTableWidgetItem(str(preset.get("category", ""))))
 
     def add_row(self):
         new_row_index = self.table.rowCount()
@@ -94,7 +102,8 @@ class PresetsEditor(QDialog):
             width_text = self._cell_text(row_index, 1)
             height_text = self._cell_text(row_index, 2)
             position = self.table.cellWidget(row_index, 3).currentText()
-            category = self._cell_text(row_index, 4)
+            size_mode = self.table.cellWidget(row_index, 4).currentText()
+            category = self._cell_text(row_index, 5)
 
             if not name:
                 self._report_error(f"Row {row_index + 1}: name cannot be empty.")
@@ -110,6 +119,8 @@ class PresetsEditor(QDialog):
                 return
 
             preset = {"name": name, "width": width, "height": height, "position": position}
+            if size_mode != "outer":
+                preset["sizeMode"] = size_mode
             if category:
                 preset["category"] = category
             existing_identifier = self._row_identifiers[row_index]
