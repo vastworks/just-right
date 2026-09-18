@@ -80,6 +80,14 @@ class KWinBackend:
             "WindowSizer_RequestActiveApplication",
         )
 
+    def request_output_scale(self, tray):
+        """Ask KWin for the active window output's logical-coordinate scale."""
+        sizer_engine.run_qdbus(
+            "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
+            "org.kde.kglobalaccel.Component.invokeShortcut",
+            "WindowSizer_RequestOutputScale",
+        )
+
 
 # ---------------------------------------------------------------------------
 # X11 backend (Cinnamon / Mint): direct window manipulation via wmctrl.
@@ -148,6 +156,10 @@ class X11Backend:
         window_class = _run(["xdotool", "getwindowclassname", window_id]).strip()
         if window_class:
             tray.set_active_application("resourceClass", window_class)
+
+    def request_output_scale(self, tray):
+        """X11 has no compositor output-scale API; report its native units."""
+        tray.set_output_scale("X11", 1.0)
 
     # -- internals --
 

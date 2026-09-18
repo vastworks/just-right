@@ -454,6 +454,18 @@ registerShortcut("WindowSizer_RequestActiveApplication", "Just Right: Refresh ac
     if (win) publishActiveApplication(win);
 }});
 
+registerShortcut("WindowSizer_RequestOutputScale", "Just Right: Refresh output scale", "", function() {{
+    var win = workspace.activeWindow;
+    if (!win || !win.output) return;
+    var output = win.output;
+    // Geometry exposed by KWin scripts is logical. KWin versions expose the
+    // scale as `scale`; devicePixelRatio is retained as a compatibility
+    // fallback for older API variants.
+    var scale = output.scale || output.devicePixelRatio || 1;
+    callDBus("org.justright.tray", "/SizeOverlay", "", "showOutputScale",
+             String(output.name || "Current output"), Number(scale));
+}});
+
 workspace.windowActivated.connect(function (win) {{ publishActiveApplication(win); }});
 """
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)

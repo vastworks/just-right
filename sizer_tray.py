@@ -202,6 +202,10 @@ class TrayDBusService(QObject):
     def rememberPreset(self, identity_type, identity_value, preset_identifier):  # noqa: N802
         sizer_engine.remember_app_preset(identity_type, identity_value, preset_identifier)
 
+    @pyqtSlot(str, float)
+    def showOutputScale(self, output_name, scale):  # noqa: N802
+        self._tray.set_output_scale(output_name, scale)
+
 
 # ---------------------------------------------------------------------------
 # Main tray class
@@ -235,6 +239,9 @@ class WindowSizerTray:
         self.tray_icon.setToolTip("Just Right")
         self.menu = StickyMenu()
         self._active_app_identity = None
+        self._output_name = ""
+        self._output_scale = 1.0
+        self._scale_action = None
         self.menu.aboutToShow.connect(self._request_active_context)
         self.tray_icon.setContextMenu(self.menu)
         self.rebuild_menu()
@@ -303,6 +310,8 @@ class WindowSizerTray:
 
         self.menu.addSeparator()
         self._add_ratio_menu()
+        self._scale_action = self.menu.addAction(self._scale_label())
+        self._scale_action.setEnabled(False)
         self.menu.addSeparator()
         self.menu.addAction("Add current window size…", self._trigger_add_current_size)
         self.menu.addSeparator()
@@ -337,6 +346,7 @@ class WindowSizerTray:
         """Refresh ratio geometry and application identity from the backend."""
         self.backend.request_ratio_area(self)
         self.backend.request_active_application(self)
+        self.backend.request_output_scale(self)
 
     def set_ratio_area(self, width, height):
         """Receive an active-window usable area from the selected backend."""
@@ -346,6 +356,19 @@ class WindowSizerTray:
     def set_active_application(self, identity_type, identity_value):
         if identity_type and identity_value:
             self._active_app_identity = (identity_type, identity_value)
+
+    def _scale_label(self):
+        suffix = f" — {self._output_name}" if self._output_name else ""
+        return f"Sizing: logical pixels · scale {self._output_scale:g}×{suffix}"
+
+    def set_output_scale(self, output_name, scale):
+        """Update the informational scale label from the selected backend."""
+        if scale <= 0:
+            return
+        self._output_name = output_name
+        self._output_scale = scale
+        if self._scale_action is not None:
+            self._scale_action.setText(self._scale_label())
 
     def _remembered_preset(self):
         if self._active_app_identity is None:

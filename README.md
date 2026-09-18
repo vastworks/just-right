@@ -122,6 +122,11 @@ Sizes apply to the **window frame** (title bar + borders included), matching the
 original Windows Sizer. Centering uses the available area of the window's current
 monitor, so it works correctly across multiple displays.
 
+On Plasma, Just Right displays the active output scale in its tray menu. Preset
+dimensions are always **logical KWin pixels**. In particular, `1920×1080` at
+150% scale is a logical geometry request, not a guaranteed `1920×1080` capture
+buffer or application viewport.
+
 ## Notes / limits
 
 - A window that declares itself non-resizable is left alone.
