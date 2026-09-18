@@ -319,6 +319,18 @@ registerShortcut("WindowSizer_AddCurrentSize", "Just Right: Add current window s
              "", "addCurrentSize",
              Math.round(geo.width), Math.round(geo.height));
 }});
+
+// Ask KWin, rather than Qt, for the usable area of the active window's output.
+// This is important on mixed-monitor setups: QApplication.primaryScreen() can
+// describe a completely different monitor from the window being resized.
+registerShortcut("WindowSizer_RequestRatioArea", "Just Right: Refresh ratio menu", "", function() {{
+    var win = workspace.activeWindow;
+    if (!win) return;
+    var area = workspace.clientArea(KWin.MaximizeArea, win);
+    callDBus("org.justright.tray", "/SizeOverlay",
+             "", "showRatioArea",
+             Math.round(area.width), Math.round(area.height));
+}});
 """
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     with open(GENERATED_SCRIPT_PATH, "w", encoding="utf-8") as script_file:

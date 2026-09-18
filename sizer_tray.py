@@ -13,7 +13,7 @@ is simply absent there.
 
 import sys
 
-from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSlot
+from PyQt6.QtCore import QObject, QRect, QTimer, Qt, pyqtSlot
 from PyQt6.QtDBus import QDBusConnection, QDBusMessage
 from PyQt6.QtGui import QIcon
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
@@ -85,6 +85,14 @@ class RatioMenu(QMenu):
         self._inverted = self._alt_is_held()
         self._rebuild()
         self._alt_timer.start()
+
+    def set_area(self, area):
+        """Update the active-window work area used to build this menu."""
+        if area == self._area:
+            return
+        self._area = area
+        if self.isVisible():
+            self._rebuild()
 
     def _alt_is_held(self):
         modifiers = QApplication.queryKeyboardModifiers()
@@ -173,6 +181,10 @@ class TrayDBusService(QObject):
             requested_width, requested_height, actual_width, actual_height
         )
 
+    @pyqtSlot(int, int)
+    def showRatioArea(self, width, height):  # noqa: N802
+        self._tray.set_ratio_area(width, height)
+
 
 # ---------------------------------------------------------------------------
 # Main tray class
@@ -205,6 +217,7 @@ class WindowSizerTray:
         self.tray_icon = QSystemTrayIcon(self._load_icon())
         self.tray_icon.setToolTip("Just Right")
         self.menu = StickyMenu()
+        self.menu.aboutToShow.connect(self._request_ratio_area)
         self.tray_icon.setContextMenu(self.menu)
         self.rebuild_menu()
         self.tray_icon.show()
@@ -287,7 +300,17 @@ class WindowSizerTray:
         every ratio to its portrait inverse (16:9 -> 9:16) for pivoted monitors.
         Clicking a size resizes and centers the active window."""
         area = self.application.primaryScreen().availableGeometry()
-        self.menu.addMenu(RatioMenu(area, self._apply_ratio_size, self.menu))
+        self._ratio_menu = RatioMenu(area, self._apply_ratio_size, self.menu)
+        self.menu.addMenu(self._ratio_menu)
+
+    def _request_ratio_area(self):
+        """Refresh the ratio ladder for the window being acted on."""
+        self.backend.request_ratio_area(self)
+
+    def set_ratio_area(self, width, height):
+        """Receive an active-window usable area from the selected backend."""
+        if width > 0 and height > 0:
+            self._ratio_menu.set_area(QRect(0, 0, width, height))
 
     def _apply_ratio_size(self, width, height):
         # 150 ms delay lets the menu close so the user's window, not the menu,

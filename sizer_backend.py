@@ -60,6 +60,18 @@ class KWinBackend:
             "WindowSizer_AddCurrentSize",
         )
 
+    def request_ratio_area(self, tray):
+        """Ask the persistent KWin script for the active window's work area.
+
+        The script calls ``tray.set_ratio_area`` back over D-Bus. Keeping the
+        query in KWin avoids accidentally using the tray's primary QScreen.
+        """
+        sizer_engine.run_qdbus(
+            "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
+            "org.kde.kglobalaccel.Component.invokeShortcut",
+            "WindowSizer_RequestRatioArea",
+        )
+
 
 # ---------------------------------------------------------------------------
 # X11 backend (Cinnamon / Mint): direct window manipulation via wmctrl.
@@ -111,6 +123,12 @@ class X11Backend:
         if monitor is None:
             return None
         return monitor["width"], monitor["height"]
+
+    def request_ratio_area(self, tray):
+        """Pass the active X11 monitor geometry to the shared tray menu."""
+        size = self.active_window_monitor_size()
+        if size is not None:
+            tray.set_ratio_area(*size)
 
     # -- internals --
 
