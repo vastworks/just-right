@@ -86,9 +86,11 @@ work. See **Notes / limits** for what is KDE-only.
 - Presets: `~/.config/window-sizer/presets.json`
 - Generated KWin script: `~/.config/window-sizer/window-sizer.js`
 
-Each preset is `{ "name", "width", "height", "position", "identifier" }`, where
+Each preset is `{ "name", "width", "height", "position", "identifier", "category" }`, where
 `position` is `"keep"` or `"center"`. The `identifier` is stable across renames
-so any keyboard shortcut you assign stays bound.
+so any keyboard shortcut you assign stays bound. `category` is optional; presets
+in the same category appear together in a submenu, while existing presets with no
+category keep their flat menu position.
 
 ## How it works
 

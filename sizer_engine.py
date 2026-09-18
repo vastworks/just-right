@@ -70,6 +70,28 @@ def preset_label(preset):
     return f"{preset['name']} ({preset['width']}×{preset['height']}){suffix}"
 
 
+def preset_category(preset):
+    """User-facing optional grouping for a preset.
+
+    An absent category deliberately means "keep this legacy preset flat" so
+    existing configurations retain their menu layout after an upgrade.
+    """
+    return str(preset.get("category", "")).strip()
+
+
+def grouped_presets(presets):
+    """Return ungrouped presets and ordered category groups for menu builders."""
+    ungrouped = []
+    groups = {}
+    for preset in presets:
+        category = preset_category(preset)
+        if category:
+            groups.setdefault(category, []).append(preset)
+        else:
+            ungrouped.append(preset)
+    return ungrouped, groups
+
+
 def ensure_config_exists():
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     if not PRESETS_PATH.exists():
@@ -120,6 +142,7 @@ def generate_script(presets):
             "width": int(preset["width"]),
             "height": int(preset["height"]),
             "position": preset.get("position", "keep"),
+            "category": preset_category(preset),
         }
         for preset in presets
     ]
@@ -212,16 +235,35 @@ for (var presetIndex = 0; presetIndex < windowSizerPresets.length; presetIndex++
 
 // Add a "Just Right" submenu to the window title-bar right-click context menu.
 registerUserActionsMenu(function (win) {{
+    function menuItem(preset) {{
+        return {{
+            text: preset.menuLabel,
+            triggered: function () {{
+                applyToActiveWindow(preset.width, preset.height, preset.position, win);
+            }}
+        }};
+    }}
+    var ungrouped = [];
+    var groups = {{}};
+    var categoryOrder = [];
+    windowSizerPresets.forEach(function (preset) {{
+        if (!preset.category) {{
+            ungrouped.push(menuItem(preset));
+        }} else {{
+            if (!groups[preset.category]) {{
+                groups[preset.category] = [];
+                categoryOrder.push(preset.category);
+            }}
+            groups[preset.category].push(menuItem(preset));
+        }}
+    }});
+    var items = ungrouped.slice();
+    categoryOrder.forEach(function (category) {{
+        items.push({{ text: category, items: groups[category] }});
+    }});
     return {{
         text: "Just Right",
-        items: windowSizerPresets.map(function (preset) {{
-            return {{
-                text: preset.menuLabel,
-                triggered: function () {{
-                    applyToActiveWindow(preset.width, preset.height, preset.position, win);
-                }}
-            }};
-        }})
+        items: items
     }};
 }});
 

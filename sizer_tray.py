@@ -250,17 +250,14 @@ class WindowSizerTray:
 
     def rebuild_menu(self):
         self.menu.clear()
-        for preset in self.presets:
-            action = self.menu.addAction(sizer_engine.preset_label(preset))
-            # Keep the menu open so several presets can be tried in a row.
-            action.setProperty("keepMenuOpen", True)
-            # 150 ms delay lets the click settle before the resize fires; the
-            # menu is a popup, so the window behind it stays the active one.
-            action.triggered.connect(
-                lambda _checked, chosen=preset: QTimer.singleShot(
-                    150, lambda: self.backend.trigger_preset(chosen)
-                )
-            )
+        ungrouped, groups = sizer_engine.grouped_presets(self.presets)
+        for preset in ungrouped:
+            self._add_preset_action(self.menu, preset)
+        for category, presets in groups.items():
+            submenu = StickyMenu(category, self.menu)
+            self.menu.addMenu(submenu)
+            for preset in presets:
+                self._add_preset_action(submenu, preset)
 
         self.menu.addSeparator()
         self._add_ratio_menu()
@@ -271,6 +268,19 @@ class WindowSizerTray:
         self.menu.addAction("Reload backend", self.reload_script)
         self.menu.addSeparator()
         self.menu.addAction("Quit", self.application.quit)
+
+    def _add_preset_action(self, menu, preset):
+        """Add one saved preset to either the main menu or a category menu."""
+        action = menu.addAction(sizer_engine.preset_label(preset))
+        # Keep the menu open so several presets can be tried in a row.
+        action.setProperty("keepMenuOpen", True)
+        # 150 ms delay lets the click settle before the resize fires; the
+        # menu is a popup, so the window behind it stays the active one.
+        action.triggered.connect(
+            lambda _checked, chosen=preset: QTimer.singleShot(
+                150, lambda: self.backend.trigger_preset(chosen)
+            )
+        )
 
     def _add_ratio_menu(self):
         """Add the 'Resize to ratio' submenu. Holding Alt while it is open flips
