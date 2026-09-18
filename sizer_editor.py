@@ -32,25 +32,30 @@ class PresetsEditor(QDialog):
         # Keep the original identifiers so saved keyboard shortcuts stay bound.
         self._row_identifiers = [preset["identifier"] for preset in presets]
 
-        self.table = QTableWidget(len(presets), 4, self)
-        self.table.setHorizontalHeaderLabels(["Name", "Width", "Height", "Position"])
+        self.table = QTableWidget(len(presets), 6, self)
+        self.table.setHorizontalHeaderLabels(
+            ["Name", "Width", "Height", "Position", "Sizing", "Category"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
 
         for row_index, preset in enumerate(presets):
             self._fill_row(row_index, preset)
 
         add_button = QPushButton("Add", self)
+        developer_button = QPushButton("Add developer sizes", self)
         remove_button = QPushButton("Remove selected", self)
         save_button = QPushButton("Save", self)
         cancel_button = QPushButton("Cancel", self)
 
         add_button.clicked.connect(self.add_row)
+        developer_button.clicked.connect(self.add_developer_rows)
         remove_button.clicked.connect(self.remove_selected_row)
         save_button.clicked.connect(self.handle_save)
         cancel_button.clicked.connect(self.reject)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
+        button_row.addWidget(developer_button)
         button_row.addWidget(remove_button)
         button_row.addStretch()
         button_row.addWidget(cancel_button)
@@ -72,12 +77,35 @@ class PresetsEditor(QDialog):
         if current_position in sizer_engine.VALID_POSITIONS:
             position_box.setCurrentText(current_position)
         self.table.setCellWidget(row_index, 3, position_box)
+        size_mode_box = QComboBox()
+        size_mode_box.addItems(sizer_engine.VALID_SIZE_MODES)
+        current_size_mode = preset.get("sizeMode", "outer")
+        if current_size_mode in sizer_engine.VALID_SIZE_MODES:
+            size_mode_box.setCurrentText(current_size_mode)
+        self.table.setCellWidget(row_index, 4, size_mode_box)
+        self.table.setItem(row_index, 5, QTableWidgetItem(str(preset.get("category", ""))))
 
     def add_row(self):
         new_row_index = self.table.rowCount()
         self.table.insertRow(new_row_index)
         self._row_identifiers.append(None)
         self._fill_row(new_row_index, {"name": "New size", "width": 1280, "height": 720})
+
+    def add_developer_rows(self):
+        """Append the standard development/capture sizes once each."""
+        existing = {
+            (self._cell_text(row, 1), self._cell_text(row, 2), self._cell_text(row, 5))
+            for row in range(self.table.rowCount())
+        }
+        for preset in sizer_engine.developer_preset_templates():
+            key = (str(preset["width"]), str(preset["height"]), preset["category"])
+            if key in existing:
+                continue
+            new_row_index = self.table.rowCount()
+            self.table.insertRow(new_row_index)
+            self._row_identifiers.append(None)
+            self._fill_row(new_row_index, preset)
+            existing.add(key)
 
     def remove_selected_row(self):
         selected_row = self.table.currentRow()
@@ -93,6 +121,8 @@ class PresetsEditor(QDialog):
             width_text = self._cell_text(row_index, 1)
             height_text = self._cell_text(row_index, 2)
             position = self.table.cellWidget(row_index, 3).currentText()
+            size_mode = self.table.cellWidget(row_index, 4).currentText()
+            category = self._cell_text(row_index, 5)
 
             if not name:
                 self._report_error(f"Row {row_index + 1}: name cannot be empty.")
@@ -108,6 +138,10 @@ class PresetsEditor(QDialog):
                 return
 
             preset = {"name": name, "width": width, "height": height, "position": position}
+            if size_mode != "outer":
+                preset["sizeMode"] = size_mode
+            if category:
+                preset["category"] = category
             existing_identifier = self._row_identifiers[row_index]
             if existing_identifier:
                 preset["identifier"] = existing_identifier

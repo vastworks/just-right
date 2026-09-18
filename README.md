@@ -25,12 +25,18 @@ the right backend at launch.
 - **Keyboard shortcuts (optional).** Every preset is also a KDE global action.
   Open *System Settings → Shortcuts*, search **"Window Sizer"**, and bind keys.
 - **Aspect-ratio scaler.** A "Resize to ratio" menu offers a ladder of sizes per
-  ratio (16:9, 4:3, ...), scaled to fit your display. Hold Alt to flip them to
+  ratio (16:9, 4:3, ...), scaled to fit the active window's usable display area.
+  Each ratio has a **Fit work area** action for the largest fitting rectangle.
+  Use **Custom ratio…** to add arbitrary ratios such as 32:9, 5:4, 1:1, or 9:16.
+  Hold Alt to flip them to
   portrait (9:16, ...) for a pivoted monitor.
 - **Super + scroll to resize (X11).** Hold Super and scroll the wheel over a
   window to step it up or down the size ladder for its current ratio, keeping its
   orientation.
 - **Editable presets.** Add / edit / delete sizes in a small GUI.
+- **Developer-size template.** The editor can add a `Developer sizes` category
+  containing 640×360, 854×480, 1280×720, 1600×900, and 1920×1080. They are
+  ordinary editable presets, so client-area mode can be selected where needed.
 - **Size popup.** A size indicator appears whenever a window is resized. On KDE
   this uses the Plasma OSD; on X11 it is a floating, outlined readout that
   follows the cursor while you drag.
@@ -54,6 +60,12 @@ Start the tray immediately, without logging out:
 
 ```bash
 setsid python3 sizer_tray.py >/dev/null 2>&1 &
+```
+
+Run the display-free unit tests with:
+
+```bash
+python3 -m unittest discover -s tests
 ```
 
 ### X11 desktops (Mint / Cinnamon, beta)
@@ -84,11 +96,28 @@ work. See **Notes / limits** for what is KDE-only.
 ## Config
 
 - Presets: `~/.config/window-sizer/presets.json`
+- Remembered per-application presets: `~/.config/window-sizer/app-presets.json`
+- Custom ratios: `~/.config/window-sizer/custom-ratios.json`
 - Generated KWin script: `~/.config/window-sizer/window-sizer.js`
 
-Each preset is `{ "name", "width", "height", "position", "identifier" }`, where
+Each preset is `{ "name", "width", "height", "position", "identifier", "category", "sizeMode" }`, where
 `position` is `"keep"` or `"center"`. The `identifier` is stable across renames
-so any keyboard shortcut you assign stays bound.
+so any keyboard shortcut you assign stays bound. `category` is optional; presets
+in the same category appear together in a submenu, while existing presets with no
+category keep their flat menu position. `sizeMode` is `"outer"` (the default) or
+`"client"`. Client mode is a KWin-only one-shot conversion using KWin's
+`clientGeometry`; it is not a promise of an application's semantic game/web
+viewport and falls back to outer sizing on X11.
+
+The preset model derives `aspectRatio` from its width and height (for example,
+`1280×720` becomes `[16, 9]`) when generating KWin menu/action data. This avoids
+duplicating ratio metadata that could drift when a preset is edited; `category`
+remains the user-controlled menu grouping.
+
+When you select a saved preset, Just Right remembers it for that application and
+offers it as **Last used** in the tray menu next time. It never automatically
+resizes a newly opened window. On Plasma it identifies apps by desktop file name
+where available, then falls back to window class/name; X11 uses the window class.
 
 ## How it works
 
@@ -101,13 +130,27 @@ so any keyboard shortcut you assign stays bound.
    `org.kde.kglobalaccel … invokeShortcut <action>`. The same action is what a
    keyboard shortcut would fire.
 
+The **Fit 16:9**, **Fit 16:10**, **Fit 4:3**, **Fit 3:2**, and **Fit 21:9**
+actions are also exposed in KDE's standard shortcut configuration, without
+default bindings. They are available from the title-bar menu as well.
+
 Sizes apply to the **window frame** (title bar + borders included), matching the
 original Windows Sizer. Centering uses the available area of the window's current
 monitor, so it works correctly across multiple displays.
 
+On Plasma, Just Right displays the active output scale in its tray menu. Preset
+dimensions are always **logical KWin pixels**. In particular, `1920×1080` at
+150% scale is a logical geometry request, not a guaranteed `1920×1080` capture
+buffer or application viewport.
+
 ## Notes / limits
 
 - A window that declares itself non-resizable is left alone.
+- Ratio-menu entries are exact logical frame targets. A client may still apply
+  minimum/maximum or size-increment hints (terminal cell grids are a common
+  example), so their final frame can be only a best-effort match. The KWin
+  backend makes at most one bounded follow-up correction; it never runs a
+  persistent geometry-change loop.
 - If you change presets, the tray reloads automatically. If you edit
   `presets.json` by hand, pick **Reload backend** from the tray menu.
 

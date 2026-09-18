@@ -13,7 +13,7 @@ is simply absent there.
 
 import sys
 
-from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSlot
+from PyQt6.QtCore import QObject, QRect, QTimer, Qt, pyqtSlot
 from PyQt6.QtDBus import QDBusConnection, QDBusMessage
 from PyQt6.QtGui import QIcon
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QSpinBox,
     QSystemTrayIcon,
     QVBoxLayout,
 )
@@ -33,7 +34,7 @@ from PyQt6.QtWidgets import (
 import sizer_engine
 from sizer_backend import select_backend
 from sizer_editor import PresetsEditor
-from sizer_ratios import RATIOS, ratio_label, sizes_for_ratio
+from sizer_ratios import RATIOS, largest_fitting_size, ratio_label, sizes_for_ratio
 
 class StickyMenu(QMenu):
     """A QMenu that stays open when you trigger a size action, so you can apply
@@ -66,10 +67,12 @@ class RatioMenu(QMenu):
     mirrors the macOS pattern of holding a modifier to reveal alternate items.
     """
 
-    def __init__(self, area, on_pick, parent=None):
+    def __init__(self, area, on_pick, ratios, on_custom, parent=None):
         super().__init__("Resize to ratio", parent)
         self._area = area
         self._on_pick = on_pick
+        self._ratios = ratios
+        self._on_custom = on_custom
         self._inverted = False
 
         # QMenu swallows the Alt key (it is reserved for mnemonics), so we can't
@@ -85,6 +88,22 @@ class RatioMenu(QMenu):
         self._inverted = self._alt_is_held()
         self._rebuild()
         self._alt_timer.start()
+
+    def set_area(self, area):
+        """Update the active-window work area used to build this menu."""
+        if area == self._area:
+            return
+        self._area = area
+        if self.isVisible():
+            self._rebuild()
+
+    def set_ratios(self, ratios):
+        """Replace the ratio list after the user saves a custom ratio."""
+        if ratios == self._ratios:
+            return
+        self._ratios = ratios
+        if self.isVisible():
+            self._rebuild()
 
     def _alt_is_held(self):
         modifiers = QApplication.queryKeyboardModifiers()
@@ -104,11 +123,20 @@ class RatioMenu(QMenu):
         hint.setEnabled(False)
         self.addSeparator()
 
-        for ratio_width, ratio_height in RATIOS:
+        for ratio_width, ratio_height in self._ratios:
             if self._inverted:
                 ratio_width, ratio_height = ratio_height, ratio_width
             submenu = StickyMenu(ratio_label(ratio_width, ratio_height), self)
             self.addMenu(submenu)
+            fit_width, fit_height = largest_fitting_size(
+                ratio_width, ratio_height, self._area.width(), self._area.height()
+            )
+            fit_action = submenu.addAction(f"Fit work area ({fit_width} × {fit_height})")
+            fit_action.setProperty("keepMenuOpen", True)
+            fit_action.triggered.connect(
+                lambda _checked, w=fit_width, h=fit_height: self._on_pick(w, h)
+            )
+            submenu.addSeparator()
             for width, height in sizes_for_ratio(
                 ratio_width, ratio_height, self._area.width(), self._area.height()
             ):
@@ -118,6 +146,8 @@ class RatioMenu(QMenu):
                 action.triggered.connect(
                     lambda _checked, w=width, h=height: self._on_pick(w, h)
                 )
+        self.addSeparator()
+        self.addAction("Custom ratio…", self._on_custom)
 
 
 TRAY_ICON_NAMES = ["transform-scale", "view-fullscreen", "zoom-fit-best", "preferences-system-windows"]
@@ -173,6 +203,22 @@ class TrayDBusService(QObject):
             requested_width, requested_height, actual_width, actual_height
         )
 
+    @pyqtSlot(int, int)
+    def showRatioArea(self, width, height):  # noqa: N802
+        self._tray.set_ratio_area(width, height)
+
+    @pyqtSlot(str, str)
+    def showActiveApplication(self, identity_type, identity_value):  # noqa: N802
+        self._tray.set_active_application(identity_type, identity_value)
+
+    @pyqtSlot(str, str, str)
+    def rememberPreset(self, identity_type, identity_value, preset_identifier):  # noqa: N802
+        sizer_engine.remember_app_preset(identity_type, identity_value, preset_identifier)
+
+    @pyqtSlot(str, float)
+    def showOutputScale(self, output_name, scale):  # noqa: N802
+        self._tray.set_output_scale(output_name, scale)
+
 
 # ---------------------------------------------------------------------------
 # Main tray class
@@ -205,9 +251,16 @@ class WindowSizerTray:
         self.tray_icon = QSystemTrayIcon(self._load_icon())
         self.tray_icon.setToolTip("Just Right")
         self.menu = StickyMenu()
+        self._active_app_identity = None
+        self._ratio_values = self._all_ratios()
+        self._output_name = ""
+        self._output_scale = 1.0
+        self._scale_action = None
+        self.menu.aboutToShow.connect(self._request_active_context)
         self.tray_icon.setContextMenu(self.menu)
         self.rebuild_menu()
         self.tray_icon.show()
+        QTimer.singleShot(0, self._request_active_context)
 
     def _start_x11_overlay(self):
         """Bring up the X11 live-resize overlay. Optional: if python-xlib is
@@ -250,20 +303,29 @@ class WindowSizerTray:
 
     def rebuild_menu(self):
         self.menu.clear()
-        for preset in self.presets:
-            action = self.menu.addAction(sizer_engine.preset_label(preset))
-            # Keep the menu open so several presets can be tried in a row.
+        remembered = self._remembered_preset()
+        if remembered is not None:
+            action = self.menu.addAction("Last used: " + sizer_engine.preset_label(remembered))
             action.setProperty("keepMenuOpen", True)
-            # 150 ms delay lets the click settle before the resize fires; the
-            # menu is a popup, so the window behind it stays the active one.
             action.triggered.connect(
-                lambda _checked, chosen=preset: QTimer.singleShot(
+                lambda _checked, chosen=remembered: QTimer.singleShot(
                     150, lambda: self.backend.trigger_preset(chosen)
                 )
             )
+            self.menu.addSeparator()
+        ungrouped, groups = sizer_engine.grouped_presets(self.presets)
+        for preset in ungrouped:
+            self._add_preset_action(self.menu, preset)
+        for category, presets in groups.items():
+            submenu = StickyMenu(category, self.menu)
+            self.menu.addMenu(submenu)
+            for preset in presets:
+                self._add_preset_action(submenu, preset)
 
         self.menu.addSeparator()
         self._add_ratio_menu()
+        self._scale_action = self.menu.addAction(self._scale_label())
+        self._scale_action.setEnabled(False)
         self.menu.addSeparator()
         self.menu.addAction("Add current window size…", self._trigger_add_current_size)
         self.menu.addSeparator()
@@ -272,17 +334,112 @@ class WindowSizerTray:
         self.menu.addSeparator()
         self.menu.addAction("Quit", self.application.quit)
 
+    def _add_preset_action(self, menu, preset):
+        """Add one saved preset to either the main menu or a category menu."""
+        action = menu.addAction(sizer_engine.preset_label(preset))
+        # Keep the menu open so several presets can be tried in a row.
+        action.setProperty("keepMenuOpen", True)
+        # 150 ms delay lets the click settle before the resize fires; the
+        # menu is a popup, so the window behind it stays the active one.
+        action.triggered.connect(
+            lambda _checked, chosen=preset: QTimer.singleShot(
+                150, lambda: self.backend.trigger_preset(chosen)
+            )
+        )
+
     def _add_ratio_menu(self):
         """Add the 'Resize to ratio' submenu. Holding Alt while it is open flips
         every ratio to its portrait inverse (16:9 -> 9:16) for pivoted monitors.
-        Clicking a size resizes and centers the active window."""
+        Clicking a size resizes and centers the active window. Each ratio also
+        has a fit-work-area action for the largest available rectangle."""
         area = self.application.primaryScreen().availableGeometry()
-        self.menu.addMenu(RatioMenu(area, self._apply_ratio_size, self.menu))
+        self._ratio_menu = RatioMenu(
+            area, self._apply_ratio_size, self._ratio_values,
+            self._add_custom_ratio, self.menu,
+        )
+        self.menu.addMenu(self._ratio_menu)
+
+    def _all_ratios(self):
+        """Default ratios followed by user-created pairs, without duplicates."""
+        ratios = list(RATIOS)
+        for ratio in sizer_engine.load_custom_ratios():
+            if ratio not in ratios:
+                ratios.append(ratio)
+        return ratios
+
+    def _add_custom_ratio(self):
+        """Prompt for a persistent custom width:height ratio."""
+        dialog = QDialog()
+        dialog.setWindowTitle("Custom aspect ratio")
+        width_box = QSpinBox(dialog)
+        height_box = QSpinBox(dialog)
+        for box, value in ((width_box, 16), (height_box, 9)):
+            box.setRange(1, 9999)
+            box.setValue(value)
+        form = QFormLayout()
+        form.addRow("Width:", width_box)
+        form.addRow("Height:", height_box)
+        save_button = QPushButton("Add", dialog)
+        save_button.setDefault(True)
+        cancel_button = QPushButton("Cancel", dialog)
+        save_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(save_button)
+        layout = QVBoxLayout(dialog)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+        if dialog.exec():
+            sizer_engine.add_custom_ratio(width_box.value(), height_box.value())
+            self._ratio_values = self._all_ratios()
+            self._ratio_menu.set_ratios(self._ratio_values)
+
+    def _request_active_context(self):
+        """Refresh ratio geometry and application identity from the backend."""
+        self.backend.request_ratio_area(self)
+        self.backend.request_active_application(self)
+        self.backend.request_output_scale(self)
+
+    def set_ratio_area(self, width, height):
+        """Receive an active-window usable area from the selected backend."""
+        if width > 0 and height > 0:
+            self._ratio_menu.set_area(QRect(0, 0, width, height))
+
+    def set_active_application(self, identity_type, identity_value):
+        if identity_type and identity_value:
+            self._active_app_identity = (identity_type, identity_value)
+
+    def _scale_label(self):
+        suffix = f" — {self._output_name}" if self._output_name else ""
+        return f"Sizing: logical pixels · scale {self._output_scale:g}×{suffix}"
+
+    def set_output_scale(self, output_name, scale):
+        """Update the informational scale label from the selected backend."""
+        if scale <= 0:
+            return
+        self._output_name = output_name
+        self._output_scale = scale
+        if self._scale_action is not None:
+            self._scale_action.setText(self._scale_label())
+
+    def _remembered_preset(self):
+        if self._active_app_identity is None:
+            return None
+        identifier = sizer_engine.remembered_preset_identifier(*self._active_app_identity)
+        return next(
+            (preset for preset in self.presets if preset["identifier"] == identifier),
+            None,
+        )
 
     def _apply_ratio_size(self, width, height):
         # 150 ms delay lets the menu close so the user's window, not the menu,
         # is the active window when the resize fires.
-        QTimer.singleShot(150, lambda: self.backend.apply_size(width, height, "center"))
+        QTimer.singleShot(
+            150,
+            lambda: self.backend.apply_size(width, height, "center", ratio=(width, height)),
+        )
 
     def _trigger_add_current_size(self):
         """Read the active window's current size so it can be saved as a preset.

@@ -43,9 +43,9 @@ class KWinBackend:
         """Resize the active window by firing the preset's kglobalaccel action."""
         return sizer_engine.trigger_preset(preset)
 
-    def apply_size(self, width, height, position="center"):
+    def apply_size(self, width, height, position="center", ratio=None):
         """Resize the active window to an ad-hoc size (used by the ratio scaler)."""
-        sizer_engine.apply_size_kwin(width, height, position)
+        sizer_engine.apply_size_kwin(width, height, position, ratio)
 
     def add_current_size(self, tray):
         """Ask the KWin script for the active window's size.
@@ -58,6 +58,34 @@ class KWinBackend:
             "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
             "org.kde.kglobalaccel.Component.invokeShortcut",
             "WindowSizer_AddCurrentSize",
+        )
+
+    def request_ratio_area(self, tray):
+        """Ask the persistent KWin script for the active window's work area.
+
+        The script calls ``tray.set_ratio_area`` back over D-Bus. Keeping the
+        query in KWin avoids accidentally using the tray's primary QScreen.
+        """
+        sizer_engine.run_qdbus(
+            "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
+            "org.kde.kglobalaccel.Component.invokeShortcut",
+            "WindowSizer_RequestRatioArea",
+        )
+
+    def request_active_application(self, tray):
+        """Ask KWin to publish the active window identity over D-Bus."""
+        sizer_engine.run_qdbus(
+            "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
+            "org.kde.kglobalaccel.Component.invokeShortcut",
+            "WindowSizer_RequestActiveApplication",
+        )
+
+    def request_output_scale(self, tray):
+        """Ask KWin for the active window output's logical-coordinate scale."""
+        sizer_engine.run_qdbus(
+            "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
+            "org.kde.kglobalaccel.Component.invokeShortcut",
+            "WindowSizer_RequestOutputScale",
         )
 
 
@@ -80,7 +108,7 @@ class X11Backend:
             preset.get("position", "keep"),
         )
 
-    def apply_size(self, width, height, position="center"):
+    def apply_size(self, width, height, position="center", ratio=None):
         """Resize the active window to an ad-hoc size (used by the ratio scaler)."""
         left, top = None, None
         if position == "center":
@@ -111,6 +139,27 @@ class X11Backend:
         if monitor is None:
             return None
         return monitor["width"], monitor["height"]
+
+    def request_ratio_area(self, tray):
+        """Pass the active X11 monitor geometry to the shared tray menu."""
+        size = self.active_window_monitor_size()
+        if size is not None:
+            tray.set_ratio_area(*size)
+
+    def request_active_application(self, tray):
+        """Use WM_CLASS as the best available X11 application identity."""
+        if shutil.which("xdotool") is None:
+            return
+        window_id = _run(["xdotool", "getactivewindow"]).strip()
+        if not window_id:
+            return
+        window_class = _run(["xdotool", "getwindowclassname", window_id]).strip()
+        if window_class:
+            tray.set_active_application("resourceClass", window_class)
+
+    def request_output_scale(self, tray):
+        """X11 has no compositor output-scale API; report its native units."""
+        tray.set_output_scale("X11", 1.0)
 
     # -- internals --
 

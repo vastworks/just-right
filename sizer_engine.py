@@ -6,14 +6,18 @@ app and the presets editor import from here so there is a single source of truth
 """
 
 import json
+import math
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
 CONFIG_DIRECTORY = Path.home() / ".config" / "window-sizer"
 PRESETS_PATH = CONFIG_DIRECTORY / "presets.json"
+APP_PRESETS_PATH = CONFIG_DIRECTORY / "app-presets.json"
+CUSTOM_RATIOS_PATH = CONFIG_DIRECTORY / "custom-ratios.json"
 GENERATED_SCRIPT_PATH = CONFIG_DIRECTORY / "window-sizer.js"
 
 # Name KWin/kglobalaccel uses to identify this loaded script.
@@ -22,6 +26,7 @@ KWIN_PLUGIN_NAME = "window_sizer"
 KGLOBALACCEL_COMPONENT = "kwin"
 
 VALID_POSITIONS = ("keep", "center")
+VALID_SIZE_MODES = ("outer", "client")
 
 DEFAULT_PRESETS = [
     {"name": "720p", "width": 1280, "height": 720, "position": "keep"},
@@ -29,6 +34,16 @@ DEFAULT_PRESETS = [
     {"name": "1080p", "width": 1920, "height": 1080, "position": "keep"},
     {"name": "Half HD", "width": 960, "height": 1080, "position": "keep"},
     {"name": "Compact", "width": 800, "height": 600, "position": "center"},
+]
+
+# A convenience template, not a special resize path. Users can edit the
+# resulting presets (including switching them to client-area mode) normally.
+DEVELOPER_PRESETS = [
+    {"name": "640×360", "width": 640, "height": 360},
+    {"name": "854×480", "width": 854, "height": 480},
+    {"name": "1280×720", "width": 1280, "height": 720},
+    {"name": "1600×900", "width": 1600, "height": 900},
+    {"name": "1920×1080", "width": 1920, "height": 1080},
 ]
 
 # Prefer the Qt6 qdbus binary; fall back to the Qt5 one if needed.
@@ -67,7 +82,31 @@ def action_name_for(preset):
 
 def preset_label(preset):
     suffix = " · centered" if preset.get("position") == "center" else ""
+    if preset.get("sizeMode", "outer") == "client":
+        suffix += " · client area"
     return f"{preset['name']} ({preset['width']}×{preset['height']}){suffix}"
+
+
+def preset_category(preset):
+    """User-facing optional grouping for a preset.
+
+    An absent category deliberately means "keep this legacy preset flat" so
+    existing configurations retain their menu layout after an upgrade.
+    """
+    return str(preset.get("category", "")).strip()
+
+
+def grouped_presets(presets):
+    """Return ungrouped presets and ordered category groups for menu builders."""
+    ungrouped = []
+    groups = {}
+    for preset in presets:
+        category = preset_category(preset)
+        if category:
+            groups.setdefault(category, []).append(preset)
+        else:
+            ungrouped.append(preset)
+    return ungrouped, groups
 
 
 def ensure_config_exists():
@@ -80,6 +119,9 @@ def _with_identifier(preset):
     copied = dict(preset)
     copied.setdefault("identifier", uuid.uuid4().hex[:8])
     copied.setdefault("position", "keep")
+    copied.setdefault("sizeMode", "outer")
+    if copied["sizeMode"] not in VALID_SIZE_MODES:
+        copied["sizeMode"] = "outer"
     return copied
 
 
@@ -109,6 +151,120 @@ def save_presets(presets):
     return normalized
 
 
+def app_identity_key(identity_type, identity_value):
+    """Stable, namespaced key for a KWin application identity."""
+    return f"{identity_type}:{identity_value}"
+
+
+def load_app_presets():
+    """Load optional remembered preset IDs from their separate config file."""
+    if not APP_PRESETS_PATH.exists():
+        return {}
+    try:
+        with open(APP_PRESETS_PATH, "r", encoding="utf-8") as app_file:
+            remembered = json.load(app_file)
+    except (json.JSONDecodeError, OSError, ValueError):
+        return {}
+    return remembered if isinstance(remembered, dict) else {}
+
+
+def remember_app_preset(identity_type, identity_value, preset_identifier):
+    """Record the last manually selected preset for one application identity."""
+    if not identity_type or not identity_value or not preset_identifier:
+        return
+    remembered = load_app_presets()
+    remembered[app_identity_key(identity_type, identity_value)] = {
+        "presetIdentifier": str(preset_identifier),
+        "updatedAt": int(time.time()),
+    }
+    CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    tmp_path = APP_PRESETS_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as app_file:
+        json.dump(remembered, app_file, indent=2)
+    tmp_path.replace(APP_PRESETS_PATH)
+
+
+def remembered_preset_identifier(identity_type, identity_value):
+    entry = load_app_presets().get(app_identity_key(identity_type, identity_value), {})
+    return entry.get("presetIdentifier") if isinstance(entry, dict) else None
+
+
+def normalize_ratio(width, height):
+    """Return a reduced positive ratio pair, or ``None`` for invalid input."""
+    try:
+        width, height = int(width), int(height)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    divisor = math.gcd(width, height)
+    return width // divisor, height // divisor
+
+
+def load_custom_ratios():
+    """Load user-created ratio pairs without coupling them to preset storage."""
+    if not CUSTOM_RATIOS_PATH.exists():
+        return []
+    try:
+        with open(CUSTOM_RATIOS_PATH, "r", encoding="utf-8") as ratios_file:
+            raw_ratios = json.load(ratios_file)
+    except (json.JSONDecodeError, OSError, ValueError):
+        return []
+    if not isinstance(raw_ratios, list):
+        return []
+    normalized = []
+    for item in raw_ratios:
+        if isinstance(item, dict):
+            ratio = normalize_ratio(item.get("width"), item.get("height"))
+        elif isinstance(item, list) and len(item) == 2:
+            ratio = normalize_ratio(item[0], item[1])
+        else:
+            ratio = None
+        if ratio is not None and ratio not in normalized:
+            normalized.append(ratio)
+    return normalized
+
+
+def save_custom_ratios(ratios):
+    """Persist normalized custom ratios atomically."""
+    normalized = []
+    for width, height in ratios:
+        ratio = normalize_ratio(width, height)
+        if ratio is not None and ratio not in normalized:
+            normalized.append(ratio)
+    CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    tmp_path = CUSTOM_RATIOS_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as ratios_file:
+        json.dump(
+            [{"width": width, "height": height} for width, height in normalized],
+            ratios_file,
+            indent=2,
+        )
+    tmp_path.replace(CUSTOM_RATIOS_PATH)
+    return normalized
+
+
+def add_custom_ratio(width, height):
+    """Add one custom ratio, returning the complete normalized list."""
+    ratio = normalize_ratio(width, height)
+    if ratio is None:
+        raise ValueError("ratio dimensions must be positive whole numbers")
+    return save_custom_ratios(load_custom_ratios() + [ratio])
+
+
+def preset_aspect_ratio(preset):
+    """Derive a preset's reduced aspect ratio instead of duplicating it in JSON."""
+    return normalize_ratio(preset.get("width"), preset.get("height"))
+
+
+def developer_preset_templates():
+    """Return fresh developer-size preset definitions for the editor."""
+    return [
+        {**preset, "position": "center", "category": "Developer sizes"}
+        for preset in DEVELOPER_PRESETS
+    ]
+
+
 def generate_script(presets):
     """Bake the preset list into a KWin JavaScript file. Each preset becomes a
     named shortcut that resizes (and optionally re-centers) the active window."""
@@ -120,6 +276,10 @@ def generate_script(presets):
             "width": int(preset["width"]),
             "height": int(preset["height"]),
             "position": preset.get("position", "keep"),
+            "sizeMode": preset.get("sizeMode", "outer"),
+            "aspectRatio": list(preset_aspect_ratio(preset) or ()),
+            "category": preset_category(preset),
+            "identifier": preset["identifier"],
         }
         for preset in presets
     ]
@@ -127,8 +287,9 @@ def generate_script(presets):
 
     script_source = f"""// Generated by Window Sizer. Do not edit by hand.
 var windowSizerPresets = {presets_literal};
+var windowSizerFitRatios = [[16, 9], [16, 10], [4, 3], [3, 2], [21, 9]];
 
-function applyToActiveWindow(targetWidth, targetHeight, position, windowOverride) {{
+function applyToActiveWindow(targetWidth, targetHeight, position, sizeMode, windowOverride) {{
     var win = windowOverride || workspace.activeWindow;
     if (!win) {{
         return;
@@ -143,19 +304,29 @@ function applyToActiveWindow(targetWidth, targetHeight, position, windowOverride
     function doResize() {{
         win._sizerHandler = null;
         var currentGeometry = win.frameGeometry;
+        var requestedFrameWidth = targetWidth;
+        var requestedFrameHeight = targetHeight;
+        if (sizeMode === "client") {{
+            // KWin's clientGeometry is the compositor-defined client rectangle,
+            // not an application's semantic viewport. Use the current frame
+            // extents for a one-shot conversion to a frameGeometry request.
+            var client = win.clientGeometry;
+            requestedFrameWidth = targetWidth + Math.max(0, currentGeometry.width - client.width);
+            requestedFrameHeight = targetHeight + Math.max(0, currentGeometry.height - client.height);
+        }}
         var newX = currentGeometry.x;
         var newY = currentGeometry.y;
         if (position === "center") {{
             var area = workspace.clientArea(KWin.MaximizeArea, win);
-            newX = area.x + Math.round((area.width - targetWidth) / 2);
-            newY = area.y + Math.round((area.height - targetHeight) / 2);
+            newX = area.x + Math.round((area.width - requestedFrameWidth) / 2);
+            newY = area.y + Math.round((area.height - requestedFrameHeight) / 2);
         }}
         // Qt.rect() is QML-only; plain JS objects are converted to QRectF
         // via KWin's registered QJSValue→QRectF meta-type converter.
-        win.frameGeometry = {{ x: newX, y: newY, width: targetWidth, height: targetHeight }};
+        win.frameGeometry = {{ x: newX, y: newY, width: requestedFrameWidth, height: requestedFrameHeight }};
         // KWin clamps to the app's declared minSize before applying; if the
         // resulting size differs from what we asked, surface that to the user.
-        var actual = win.frameGeometry;
+        var actual = sizeMode === "client" ? win.clientGeometry : win.frameGeometry;
         if (actual.width !== targetWidth || actual.height !== targetHeight) {{
             callDBus("org.justright.tray", "/SizeOverlay",
                      "", "showClamped",
@@ -202,26 +373,103 @@ function applyToActiveWindow(targetWidth, targetHeight, position, windowOverride
     }}
 }}
 
+function applicationIdentity(win) {{
+    if (win.desktopFileName) return {{ type: "desktopFileName", value: win.desktopFileName }};
+    if (win.resourceClass) return {{ type: "resourceClass", value: win.resourceClass }};
+    if (win.resourceName) return {{ type: "resourceName", value: win.resourceName }};
+    return null;
+}}
+
+function publishActiveApplication(win) {{
+    var identity = applicationIdentity(win);
+    if (!identity) return;
+    callDBus("org.justright.tray", "/SizeOverlay", "", "showActiveApplication",
+             identity.type, identity.value);
+}}
+
+function applyPreset(preset, windowOverride) {{
+    var win = windowOverride || workspace.activeWindow;
+    if (!win) return;
+    var identity = applicationIdentity(win);
+    if (identity) {{
+        callDBus("org.justright.tray", "/SizeOverlay", "", "rememberPreset",
+                 identity.type, identity.value, preset.identifier);
+    }}
+    applyToActiveWindow(preset.width, preset.height, preset.position, preset.sizeMode, win);
+}}
+
+function fitRatioToWindow(ratioWidth, ratioHeight, windowOverride) {{
+    var win = windowOverride || workspace.activeWindow;
+    if (!win) return;
+    var area = workspace.clientArea(KWin.MaximizeArea, win);
+    var width;
+    var height;
+    if (area.width * ratioHeight > ratioWidth * area.height) {{
+        height = area.height;
+        width = Math.round(height * ratioWidth / ratioHeight);
+    }} else {{
+        width = area.width;
+        height = Math.round(width * ratioHeight / ratioWidth);
+    }}
+    applyToActiveWindow(width, height, "center", "outer", win);
+}}
+
 for (var presetIndex = 0; presetIndex < windowSizerPresets.length; presetIndex++) {{
     (function (preset) {{
         registerShortcut(preset.actionName, preset.label, "", function () {{
-            applyToActiveWindow(preset.width, preset.height, preset.position);
+            applyPreset(preset);
         }});
     }})(windowSizerPresets[presetIndex]);
 }}
 
+for (var ratioIndex = 0; ratioIndex < windowSizerFitRatios.length; ratioIndex++) {{
+    (function (ratio) {{
+        var label = ratio[0] + ":" + ratio[1];
+        registerShortcut("WindowSizer_FitRatio_" + ratio[0] + "x" + ratio[1],
+                         "Just Right: Fit " + label, "", function () {{
+            fitRatioToWindow(ratio[0], ratio[1]);
+        }});
+    }})(windowSizerFitRatios[ratioIndex]);
+}}
+
 // Add a "Just Right" submenu to the window title-bar right-click context menu.
 registerUserActionsMenu(function (win) {{
+    function menuItem(preset) {{
+        return {{
+            text: preset.menuLabel,
+            triggered: function () {{
+                applyPreset(preset, win);
+            }}
+        }};
+    }}
+    var ungrouped = [];
+    var groups = {{}};
+    var categoryOrder = [];
+    windowSizerPresets.forEach(function (preset) {{
+        if (!preset.category) {{
+            ungrouped.push(menuItem(preset));
+        }} else {{
+            if (!groups[preset.category]) {{
+                groups[preset.category] = [];
+                categoryOrder.push(preset.category);
+            }}
+            groups[preset.category].push(menuItem(preset));
+        }}
+    }});
+    var items = ungrouped.slice();
+    categoryOrder.forEach(function (category) {{
+        items.push({{ text: category, items: groups[category] }});
+    }});
+    var fitItems = windowSizerFitRatios.map(function (ratio) {{
+        return {{
+            text: "Fit " + ratio[0] + ":" + ratio[1] + " to work area",
+            triggered: function () {{ fitRatioToWindow(ratio[0], ratio[1], win); }}
+        }};
+    }});
+    items.push({{ text: "Fit aspect ratio", items: fitItems }});
     return {{
         text: "Just Right",
-        items: windowSizerPresets.map(function (preset) {{
-            return {{
-                text: preset.menuLabel,
-                triggered: function () {{
-                    applyToActiveWindow(preset.width, preset.height, preset.position, win);
-                }}
-            }};
-        }})
+        items: items
     }};
 }});
 
@@ -277,6 +525,37 @@ registerShortcut("WindowSizer_AddCurrentSize", "Just Right: Add current window s
              "", "addCurrentSize",
              Math.round(geo.width), Math.round(geo.height));
 }});
+
+// Ask KWin, rather than Qt, for the usable area of the active window's output.
+// This is important on mixed-monitor setups: QApplication.primaryScreen() can
+// describe a completely different monitor from the window being resized.
+registerShortcut("WindowSizer_RequestRatioArea", "Just Right: Refresh ratio menu", "", function() {{
+    var win = workspace.activeWindow;
+    if (!win) return;
+    var area = workspace.clientArea(KWin.MaximizeArea, win);
+    callDBus("org.justright.tray", "/SizeOverlay",
+             "", "showRatioArea",
+             Math.round(area.width), Math.round(area.height));
+}});
+
+registerShortcut("WindowSizer_RequestActiveApplication", "Just Right: Refresh active application", "", function() {{
+    var win = workspace.activeWindow;
+    if (win) publishActiveApplication(win);
+}});
+
+registerShortcut("WindowSizer_RequestOutputScale", "Just Right: Refresh output scale", "", function() {{
+    var win = workspace.activeWindow;
+    if (!win || !win.output) return;
+    var output = win.output;
+    // Geometry exposed by KWin scripts is logical. KWin versions expose the
+    // scale as `scale`; devicePixelRatio is retained as a compatibility
+    // fallback for older API variants.
+    var scale = output.scale || output.devicePixelRatio || 1;
+    callDBus("org.justright.tray", "/SizeOverlay", "", "showOutputScale",
+             String(output.name || "Current output"), Number(scale));
+}});
+
+workspace.windowActivated.connect(function (win) {{ publishActiveApplication(win); }});
 """
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     with open(GENERATED_SCRIPT_PATH, "w", encoding="utf-8") as script_file:
@@ -307,7 +586,7 @@ KWIN_ONESHOT_NAME = "window_sizer_oneshot"
 ONESHOT_SCRIPT_PATH = CONFIG_DIRECTORY / "window-sizer-oneshot.js"
 
 
-def apply_size_kwin(width, height, position="center"):
+def apply_size_kwin(width, height, position="center", ratio=None):
     """Resize the active window to an arbitrary size right now, without a saved
     preset or registered shortcut. Used by the aspect-ratio scaler.
 
@@ -316,15 +595,27 @@ def apply_size_kwin(width, height, position="center"):
     active window once on load, under its own plugin name so it leaves the
     persistent preset script alone.
     """
-    _generate_oneshot_script(int(width), int(height), position)
+    _generate_oneshot_script(int(width), int(height), position, ratio)
     run_qdbus("/Scripting", "org.kde.kwin.Scripting.unloadScript", KWIN_ONESHOT_NAME)
     run_qdbus("/Scripting", "org.kde.kwin.Scripting.loadScript",
               str(ONESHOT_SCRIPT_PATH), KWIN_ONESHOT_NAME)
     run_qdbus("/Scripting", "org.kde.kwin.Scripting.start")
 
 
-def _generate_oneshot_script(width, height, position):
-    target = json.dumps({"width": width, "height": height, "position": position})
+def _generate_oneshot_script(width, height, position, ratio=None):
+    """Generate one bounded ratio correction after KWin applies client hints.
+
+    A client can quantize or clamp a requested rectangle (terminal cell grids are
+    a common example). Ratio actions get one follow-up geometry assignment based
+    on KWin's accepted size; exact preset actions deliberately retain their
+    current one-shot semantics. This is not an interactive-resize event loop.
+    """
+    target = json.dumps({
+        "width": width,
+        "height": height,
+        "position": position,
+        "ratio": list(ratio) if ratio is not None else None,
+    })
     # Mirrors the resize logic in generate_script(): clear maximize/fullscreen
     # first, and on Wayland wait for frameGeometryChanged before stamping the
     # target size (setMaximize/fullScreen settle asynchronously).
@@ -343,7 +634,83 @@ var target = {target};
             newX = area.x + Math.round((area.width - target.width) / 2);
             newY = area.y + Math.round((area.height - target.height) / 2);
         }}
+        armRatioCorrection();
         win.frameGeometry = {{ x: newX, y: newY, width: target.width, height: target.height }};
+    }}
+
+    function constrainRatioOnce() {{
+        if (!target.ratio) return;
+        var ratioWidth = target.ratio[0];
+        var ratioHeight = target.ratio[1];
+        var actual = win.frameGeometry;
+        if (actual.width * ratioHeight === actual.height * ratioWidth) return;
+
+        // Respect the dimension KWin/client accepted, then derive the other.
+        // If one requested dimension survived client quantisation, preserve it;
+        // otherwise prefer changing the smaller amount. Never exceed the work
+        // area.
+        var fromHeight = {{
+            width: Math.round(actual.height * ratioWidth / ratioHeight),
+            height: actual.height
+        }};
+        var fromWidth = {{
+            width: actual.width,
+            height: Math.round(actual.width * ratioHeight / ratioWidth)
+        }};
+        var area = workspace.clientArea(KWin.MaximizeArea, win);
+        var candidates = [fromHeight, fromWidth].filter(function (candidate) {{
+            return candidate.width > 0 && candidate.height > 0 &&
+                candidate.width <= area.width && candidate.height <= area.height;
+        }});
+        if (!candidates.length) return;
+        var corrected;
+        if (actual.width === target.width &&
+                   fromHeight.width <= area.width && fromHeight.height <= area.height) {{
+            corrected = fromHeight;
+        }} else if (actual.height === target.height &&
+                   fromWidth.width <= area.width && fromWidth.height <= area.height) {{
+            corrected = fromWidth;
+        }} else {{
+            candidates.sort(function (left, right) {{
+                var leftDelta = Math.abs(left.width - actual.width) + Math.abs(left.height - actual.height);
+                var rightDelta = Math.abs(right.width - actual.width) + Math.abs(right.height - actual.height);
+                return leftDelta - rightDelta;
+            }});
+            corrected = candidates[0];
+        }}
+        if (corrected.width > area.width || corrected.height > area.height) return;
+        if (corrected.width === actual.width && corrected.height === actual.height) return;
+        var x = actual.x;
+        var y = actual.y;
+        if (target.position === "center") {{
+            x = area.x + Math.round((area.width - corrected.width) / 2);
+            y = area.y + Math.round((area.height - corrected.height) / 2);
+        }}
+        win.frameGeometry = {{ x: x, y: y, width: corrected.width, height: corrected.height }};
+    }}
+
+    function armRatioCorrection() {{
+        if (!target.ratio) return;
+
+        // KWin can apply a geometry first and a client can then asynchronously
+        // snap it to its size increments. Watch only the resize action's short
+        // settling window, and disconnect *before* our one correction. This is
+        // intentionally not a persistent geometry-change feedback loop and is
+        // unrelated to interactive aspect-ratio locking.
+        var startedAt = Date.now();
+        var handler = function () {{
+            if (Date.now() - startedAt > 1000) {{
+                win.frameGeometryChanged.disconnect(handler);
+                return;
+            }}
+            var actual = win.frameGeometry;
+            if (actual.width * target.ratio[1] === actual.height * target.ratio[0]) {{
+                return;
+            }}
+            win.frameGeometryChanged.disconnect(handler);
+            constrainRatioOnce();
+        }};
+        win.frameGeometryChanged.connect(handler);
     }}
 
     function deferResize() {{
