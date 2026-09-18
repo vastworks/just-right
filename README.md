@@ -26,6 +26,7 @@ the right backend at launch.
   Open *System Settings → Shortcuts*, search **"Window Sizer"**, and bind keys.
 - **Aspect-ratio scaler.** A "Resize to ratio" menu offers a ladder of sizes per
   ratio (16:9, 4:3, ...), scaled to fit the active window's usable display area.
+  Each ratio has a **Fit work area** action for the largest fitting rectangle.
   Hold Alt to flip them to
   portrait (9:16, ...) for a pivoted monitor.
 - **Super + scroll to resize (X11).** Hold Super and scroll the wheel over a
@@ -112,6 +113,10 @@ where available, then falls back to window class/name; X11 uses the window class
 3. The tray triggers a preset by calling
    `org.kde.kglobalaccel … invokeShortcut <action>`. The same action is what a
    keyboard shortcut would fire.
+
+The **Fit 16:9**, **Fit 16:10**, **Fit 4:3**, **Fit 3:2**, and **Fit 21:9**
+actions are also exposed in KDE's standard shortcut configuration, without
+default bindings. They are available from the title-bar menu as well.
 
 Sizes apply to the **window frame** (title bar + borders included), matching the
 original Windows Sizer. Centering uses the available area of the window's current

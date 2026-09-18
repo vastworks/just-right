@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 import sizer_engine
 from sizer_backend import select_backend
 from sizer_editor import PresetsEditor
-from sizer_ratios import RATIOS, ratio_label, sizes_for_ratio
+from sizer_ratios import RATIOS, largest_fitting_size, ratio_label, sizes_for_ratio
 
 class StickyMenu(QMenu):
     """A QMenu that stays open when you trigger a size action, so you can apply
@@ -117,6 +117,15 @@ class RatioMenu(QMenu):
                 ratio_width, ratio_height = ratio_height, ratio_width
             submenu = StickyMenu(ratio_label(ratio_width, ratio_height), self)
             self.addMenu(submenu)
+            fit_width, fit_height = largest_fitting_size(
+                ratio_width, ratio_height, self._area.width(), self._area.height()
+            )
+            fit_action = submenu.addAction(f"Fit work area ({fit_width} × {fit_height})")
+            fit_action.setProperty("keepMenuOpen", True)
+            fit_action.triggered.connect(
+                lambda _checked, w=fit_width, h=fit_height: self._on_pick(w, h)
+            )
+            submenu.addSeparator()
             for width, height in sizes_for_ratio(
                 ratio_width, ratio_height, self._area.width(), self._area.height()
             ):
@@ -318,7 +327,8 @@ class WindowSizerTray:
     def _add_ratio_menu(self):
         """Add the 'Resize to ratio' submenu. Holding Alt while it is open flips
         every ratio to its portrait inverse (16:9 -> 9:16) for pivoted monitors.
-        Clicking a size resizes and centers the active window."""
+        Clicking a size resizes and centers the active window. Each ratio also
+        has a fit-work-area action for the largest available rectangle."""
         area = self.application.primaryScreen().availableGeometry()
         self._ratio_menu = RatioMenu(area, self._apply_ratio_size, self.menu)
         self.menu.addMenu(self._ratio_menu)
