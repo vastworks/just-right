@@ -43,9 +43,9 @@ class KWinBackend:
         """Resize the active window by firing the preset's kglobalaccel action."""
         return sizer_engine.trigger_preset(preset)
 
-    def apply_size(self, width, height, position="center"):
+    def apply_size(self, width, height, position="center", ratio=None):
         """Resize the active window to an ad-hoc size (used by the ratio scaler)."""
-        sizer_engine.apply_size_kwin(width, height, position)
+        sizer_engine.apply_size_kwin(width, height, position, ratio)
 
     def add_current_size(self, tray):
         """Ask the KWin script for the active window's size.
@@ -100,7 +100,7 @@ class X11Backend:
             preset.get("position", "keep"),
         )
 
-    def apply_size(self, width, height, position="center"):
+    def apply_size(self, width, height, position="center", ratio=None):
         """Resize the active window to an ad-hoc size (used by the ratio scaler)."""
         left, top = None, None
         if position == "center":

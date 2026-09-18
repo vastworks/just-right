@@ -434,7 +434,7 @@ KWIN_ONESHOT_NAME = "window_sizer_oneshot"
 ONESHOT_SCRIPT_PATH = CONFIG_DIRECTORY / "window-sizer-oneshot.js"
 
 
-def apply_size_kwin(width, height, position="center"):
+def apply_size_kwin(width, height, position="center", ratio=None):
     """Resize the active window to an arbitrary size right now, without a saved
     preset or registered shortcut. Used by the aspect-ratio scaler.
 
@@ -443,15 +443,27 @@ def apply_size_kwin(width, height, position="center"):
     active window once on load, under its own plugin name so it leaves the
     persistent preset script alone.
     """
-    _generate_oneshot_script(int(width), int(height), position)
+    _generate_oneshot_script(int(width), int(height), position, ratio)
     run_qdbus("/Scripting", "org.kde.kwin.Scripting.unloadScript", KWIN_ONESHOT_NAME)
     run_qdbus("/Scripting", "org.kde.kwin.Scripting.loadScript",
               str(ONESHOT_SCRIPT_PATH), KWIN_ONESHOT_NAME)
     run_qdbus("/Scripting", "org.kde.kwin.Scripting.start")
 
 
-def _generate_oneshot_script(width, height, position):
-    target = json.dumps({"width": width, "height": height, "position": position})
+def _generate_oneshot_script(width, height, position, ratio=None):
+    """Generate one bounded ratio correction after KWin applies client hints.
+
+    A client can quantize or clamp a requested rectangle (terminal cell grids are
+    a common example). Ratio actions get one follow-up geometry assignment based
+    on KWin's accepted size; exact preset actions deliberately retain their
+    current one-shot semantics. This is not an interactive-resize event loop.
+    """
+    target = json.dumps({
+        "width": width,
+        "height": height,
+        "position": position,
+        "ratio": list(ratio) if ratio is not None else None,
+    })
     # Mirrors the resize logic in generate_script(): clear maximize/fullscreen
     # first, and on Wayland wait for frameGeometryChanged before stamping the
     # target size (setMaximize/fullScreen settle asynchronously).
@@ -470,7 +482,83 @@ var target = {target};
             newX = area.x + Math.round((area.width - target.width) / 2);
             newY = area.y + Math.round((area.height - target.height) / 2);
         }}
+        armRatioCorrection();
         win.frameGeometry = {{ x: newX, y: newY, width: target.width, height: target.height }};
+    }}
+
+    function constrainRatioOnce() {{
+        if (!target.ratio) return;
+        var ratioWidth = target.ratio[0];
+        var ratioHeight = target.ratio[1];
+        var actual = win.frameGeometry;
+        if (actual.width * ratioHeight === actual.height * ratioWidth) return;
+
+        // Respect the dimension KWin/client accepted, then derive the other.
+        // If one requested dimension survived client quantisation, preserve it;
+        // otherwise prefer changing the smaller amount. Never exceed the work
+        // area.
+        var fromHeight = {{
+            width: Math.round(actual.height * ratioWidth / ratioHeight),
+            height: actual.height
+        }};
+        var fromWidth = {{
+            width: actual.width,
+            height: Math.round(actual.width * ratioHeight / ratioWidth)
+        }};
+        var area = workspace.clientArea(KWin.MaximizeArea, win);
+        var candidates = [fromHeight, fromWidth].filter(function (candidate) {{
+            return candidate.width > 0 && candidate.height > 0 &&
+                candidate.width <= area.width && candidate.height <= area.height;
+        }});
+        if (!candidates.length) return;
+        var corrected;
+        if (actual.width === target.width &&
+                   fromHeight.width <= area.width && fromHeight.height <= area.height) {{
+            corrected = fromHeight;
+        }} else if (actual.height === target.height &&
+                   fromWidth.width <= area.width && fromWidth.height <= area.height) {{
+            corrected = fromWidth;
+        }} else {{
+            candidates.sort(function (left, right) {{
+                var leftDelta = Math.abs(left.width - actual.width) + Math.abs(left.height - actual.height);
+                var rightDelta = Math.abs(right.width - actual.width) + Math.abs(right.height - actual.height);
+                return leftDelta - rightDelta;
+            }});
+            corrected = candidates[0];
+        }}
+        if (corrected.width > area.width || corrected.height > area.height) return;
+        if (corrected.width === actual.width && corrected.height === actual.height) return;
+        var x = actual.x;
+        var y = actual.y;
+        if (target.position === "center") {{
+            x = area.x + Math.round((area.width - corrected.width) / 2);
+            y = area.y + Math.round((area.height - corrected.height) / 2);
+        }}
+        win.frameGeometry = {{ x: x, y: y, width: corrected.width, height: corrected.height }};
+    }}
+
+    function armRatioCorrection() {{
+        if (!target.ratio) return;
+
+        // KWin can apply a geometry first and a client can then asynchronously
+        // snap it to its size increments. Watch only the resize action's short
+        // settling window, and disconnect *before* our one correction. This is
+        // intentionally not a persistent geometry-change feedback loop and is
+        // unrelated to interactive aspect-ratio locking.
+        var startedAt = Date.now();
+        var handler = function () {{
+            if (Date.now() - startedAt > 1000) {{
+                win.frameGeometryChanged.disconnect(handler);
+                return;
+            }}
+            var actual = win.frameGeometry;
+            if (actual.width * target.ratio[1] === actual.height * target.ratio[0]) {{
+                return;
+            }}
+            win.frameGeometryChanged.disconnect(handler);
+            constrainRatioOnce();
+        }};
+        win.frameGeometryChanged.connect(handler);
     }}
 
     function deferResize() {{

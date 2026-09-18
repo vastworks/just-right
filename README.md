@@ -117,6 +117,11 @@ monitor, so it works correctly across multiple displays.
 ## Notes / limits
 
 - A window that declares itself non-resizable is left alone.
+- Ratio-menu entries are exact logical frame targets. A client may still apply
+  minimum/maximum or size-increment hints (terminal cell grids are a common
+  example), so their final frame can be only a best-effort match. The KWin
+  backend makes at most one bounded follow-up correction; it never runs a
+  persistent geometry-change loop.
 - If you change presets, the tray reloads automatically. If you edit
   `presets.json` by hand, pick **Reload backend** from the tray menu.
 

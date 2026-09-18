@@ -349,7 +349,10 @@ class WindowSizerTray:
     def _apply_ratio_size(self, width, height):
         # 150 ms delay lets the menu close so the user's window, not the menu,
         # is the active window when the resize fires.
-        QTimer.singleShot(150, lambda: self.backend.apply_size(width, height, "center"))
+        QTimer.singleShot(
+            150,
+            lambda: self.backend.apply_size(width, height, "center", ratio=(width, height)),
+        )
 
     def _trigger_add_current_size(self):
         """Read the active window's current size so it can be saved as a preset.
