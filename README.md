@@ -62,6 +62,12 @@ Start the tray immediately, without logging out:
 setsid python3 sizer_tray.py >/dev/null 2>&1 &
 ```
 
+Run the display-free unit tests with:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
 ### X11 desktops (Mint / Cinnamon, beta)
 
 On X11 the resizing is done with `wmctrl`, and the live size popup uses
