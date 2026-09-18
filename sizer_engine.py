@@ -36,6 +36,16 @@ DEFAULT_PRESETS = [
     {"name": "Compact", "width": 800, "height": 600, "position": "center"},
 ]
 
+# A convenience template, not a special resize path. Users can edit the
+# resulting presets (including switching them to client-area mode) normally.
+DEVELOPER_PRESETS = [
+    {"name": "640×360", "width": 640, "height": 360},
+    {"name": "854×480", "width": 854, "height": 480},
+    {"name": "1280×720", "width": 1280, "height": 720},
+    {"name": "1600×900", "width": 1600, "height": 900},
+    {"name": "1920×1080", "width": 1920, "height": 1080},
+]
+
 # Prefer the Qt6 qdbus binary; fall back to the Qt5 one if needed.
 _QDBUS = next(
     (cmd for cmd in ("qdbus6", "qdbus-qt6", "qdbus") if shutil.which(cmd)),
@@ -240,6 +250,14 @@ def add_custom_ratio(width, height):
     if ratio is None:
         raise ValueError("ratio dimensions must be positive whole numbers")
     return save_custom_ratios(load_custom_ratios() + [ratio])
+
+
+def developer_preset_templates():
+    """Return fresh developer-size preset definitions for the editor."""
+    return [
+        {**preset, "position": "center", "category": "Developer sizes"}
+        for preset in DEVELOPER_PRESETS
+    ]
 
 
 def generate_script(presets):

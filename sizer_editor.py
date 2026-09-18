@@ -42,17 +42,20 @@ class PresetsEditor(QDialog):
             self._fill_row(row_index, preset)
 
         add_button = QPushButton("Add", self)
+        developer_button = QPushButton("Add developer sizes", self)
         remove_button = QPushButton("Remove selected", self)
         save_button = QPushButton("Save", self)
         cancel_button = QPushButton("Cancel", self)
 
         add_button.clicked.connect(self.add_row)
+        developer_button.clicked.connect(self.add_developer_rows)
         remove_button.clicked.connect(self.remove_selected_row)
         save_button.clicked.connect(self.handle_save)
         cancel_button.clicked.connect(self.reject)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_button)
+        button_row.addWidget(developer_button)
         button_row.addWidget(remove_button)
         button_row.addStretch()
         button_row.addWidget(cancel_button)
@@ -87,6 +90,22 @@ class PresetsEditor(QDialog):
         self.table.insertRow(new_row_index)
         self._row_identifiers.append(None)
         self._fill_row(new_row_index, {"name": "New size", "width": 1280, "height": 720})
+
+    def add_developer_rows(self):
+        """Append the standard development/capture sizes once each."""
+        existing = {
+            (self._cell_text(row, 1), self._cell_text(row, 2), self._cell_text(row, 5))
+            for row in range(self.table.rowCount())
+        }
+        for preset in sizer_engine.developer_preset_templates():
+            key = (str(preset["width"]), str(preset["height"]), preset["category"])
+            if key in existing:
+                continue
+            new_row_index = self.table.rowCount()
+            self.table.insertRow(new_row_index)
+            self._row_identifiers.append(None)
+            self._fill_row(new_row_index, preset)
+            existing.add(key)
 
     def remove_selected_row(self):
         selected_row = self.table.currentRow()

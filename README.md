@@ -34,6 +34,9 @@ the right backend at launch.
   window to step it up or down the size ladder for its current ratio, keeping its
   orientation.
 - **Editable presets.** Add / edit / delete sizes in a small GUI.
+- **Developer-size template.** The editor can add a `Developer sizes` category
+  containing 640×360, 854×480, 1280×720, 1600×900, and 1920×1080. They are
+  ordinary editable presets, so client-area mode can be selected where needed.
 - **Size popup.** A size indicator appears whenever a window is resized. On KDE
   this uses the Plasma OSD; on X11 it is a floating, outlined readout that
   follows the cursor while you drag.
