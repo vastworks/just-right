@@ -185,6 +185,14 @@ class TrayDBusService(QObject):
     def showRatioArea(self, width, height):  # noqa: N802
         self._tray.set_ratio_area(width, height)
 
+    @pyqtSlot(str, str)
+    def showActiveApplication(self, identity_type, identity_value):  # noqa: N802
+        self._tray.set_active_application(identity_type, identity_value)
+
+    @pyqtSlot(str, str, str)
+    def rememberPreset(self, identity_type, identity_value, preset_identifier):  # noqa: N802
+        sizer_engine.remember_app_preset(identity_type, identity_value, preset_identifier)
+
 
 # ---------------------------------------------------------------------------
 # Main tray class
@@ -217,10 +225,12 @@ class WindowSizerTray:
         self.tray_icon = QSystemTrayIcon(self._load_icon())
         self.tray_icon.setToolTip("Just Right")
         self.menu = StickyMenu()
-        self.menu.aboutToShow.connect(self._request_ratio_area)
+        self._active_app_identity = None
+        self.menu.aboutToShow.connect(self._request_active_context)
         self.tray_icon.setContextMenu(self.menu)
         self.rebuild_menu()
         self.tray_icon.show()
+        QTimer.singleShot(0, self._request_active_context)
 
     def _start_x11_overlay(self):
         """Bring up the X11 live-resize overlay. Optional: if python-xlib is
@@ -263,6 +273,16 @@ class WindowSizerTray:
 
     def rebuild_menu(self):
         self.menu.clear()
+        remembered = self._remembered_preset()
+        if remembered is not None:
+            action = self.menu.addAction("Last used: " + sizer_engine.preset_label(remembered))
+            action.setProperty("keepMenuOpen", True)
+            action.triggered.connect(
+                lambda _checked, chosen=remembered: QTimer.singleShot(
+                    150, lambda: self.backend.trigger_preset(chosen)
+                )
+            )
+            self.menu.addSeparator()
         ungrouped, groups = sizer_engine.grouped_presets(self.presets)
         for preset in ungrouped:
             self._add_preset_action(self.menu, preset)
@@ -303,14 +323,28 @@ class WindowSizerTray:
         self._ratio_menu = RatioMenu(area, self._apply_ratio_size, self.menu)
         self.menu.addMenu(self._ratio_menu)
 
-    def _request_ratio_area(self):
-        """Refresh the ratio ladder for the window being acted on."""
+    def _request_active_context(self):
+        """Refresh ratio geometry and application identity from the backend."""
         self.backend.request_ratio_area(self)
+        self.backend.request_active_application(self)
 
     def set_ratio_area(self, width, height):
         """Receive an active-window usable area from the selected backend."""
         if width > 0 and height > 0:
             self._ratio_menu.set_area(QRect(0, 0, width, height))
+
+    def set_active_application(self, identity_type, identity_value):
+        if identity_type and identity_value:
+            self._active_app_identity = (identity_type, identity_value)
+
+    def _remembered_preset(self):
+        if self._active_app_identity is None:
+            return None
+        identifier = sizer_engine.remembered_preset_identifier(*self._active_app_identity)
+        return next(
+            (preset for preset in self.presets if preset["identifier"] == identifier),
+            None,
+        )
 
     def _apply_ratio_size(self, width, height):
         # 150 ms delay lets the menu close so the user's window, not the menu,

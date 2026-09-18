@@ -72,6 +72,14 @@ class KWinBackend:
             "WindowSizer_RequestRatioArea",
         )
 
+    def request_active_application(self, tray):
+        """Ask KWin to publish the active window identity over D-Bus."""
+        sizer_engine.run_qdbus(
+            "/component/" + sizer_engine.KGLOBALACCEL_COMPONENT,
+            "org.kde.kglobalaccel.Component.invokeShortcut",
+            "WindowSizer_RequestActiveApplication",
+        )
+
 
 # ---------------------------------------------------------------------------
 # X11 backend (Cinnamon / Mint): direct window manipulation via wmctrl.
@@ -129,6 +137,17 @@ class X11Backend:
         size = self.active_window_monitor_size()
         if size is not None:
             tray.set_ratio_area(*size)
+
+    def request_active_application(self, tray):
+        """Use WM_CLASS as the best available X11 application identity."""
+        if shutil.which("xdotool") is None:
+            return
+        window_id = _run(["xdotool", "getactivewindow"]).strip()
+        if not window_id:
+            return
+        window_class = _run(["xdotool", "getwindowclassname", window_id]).strip()
+        if window_class:
+            tray.set_active_application("resourceClass", window_class)
 
     # -- internals --
 

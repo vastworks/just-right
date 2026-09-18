@@ -85,6 +85,7 @@ work. See **Notes / limits** for what is KDE-only.
 ## Config
 
 - Presets: `~/.config/window-sizer/presets.json`
+- Remembered per-application presets: `~/.config/window-sizer/app-presets.json`
 - Generated KWin script: `~/.config/window-sizer/window-sizer.js`
 
 Each preset is `{ "name", "width", "height", "position", "identifier", "category" }`, where
@@ -92,6 +93,11 @@ Each preset is `{ "name", "width", "height", "position", "identifier", "category
 so any keyboard shortcut you assign stays bound. `category` is optional; presets
 in the same category appear together in a submenu, while existing presets with no
 category keep their flat menu position.
+
+When you select a saved preset, Just Right remembers it for that application and
+offers it as **Last used** in the tray menu next time. It never automatically
+resizes a newly opened window. On Plasma it identifies apps by desktop file name
+where available, then falls back to window class/name; X11 uses the window class.
 
 ## How it works
 

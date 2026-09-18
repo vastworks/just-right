@@ -9,11 +9,13 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
 CONFIG_DIRECTORY = Path.home() / ".config" / "window-sizer"
 PRESETS_PATH = CONFIG_DIRECTORY / "presets.json"
+APP_PRESETS_PATH = CONFIG_DIRECTORY / "app-presets.json"
 GENERATED_SCRIPT_PATH = CONFIG_DIRECTORY / "window-sizer.js"
 
 # Name KWin/kglobalaccel uses to identify this loaded script.
@@ -131,6 +133,44 @@ def save_presets(presets):
     return normalized
 
 
+def app_identity_key(identity_type, identity_value):
+    """Stable, namespaced key for a KWin application identity."""
+    return f"{identity_type}:{identity_value}"
+
+
+def load_app_presets():
+    """Load optional remembered preset IDs from their separate config file."""
+    if not APP_PRESETS_PATH.exists():
+        return {}
+    try:
+        with open(APP_PRESETS_PATH, "r", encoding="utf-8") as app_file:
+            remembered = json.load(app_file)
+    except (json.JSONDecodeError, OSError, ValueError):
+        return {}
+    return remembered if isinstance(remembered, dict) else {}
+
+
+def remember_app_preset(identity_type, identity_value, preset_identifier):
+    """Record the last manually selected preset for one application identity."""
+    if not identity_type or not identity_value or not preset_identifier:
+        return
+    remembered = load_app_presets()
+    remembered[app_identity_key(identity_type, identity_value)] = {
+        "presetIdentifier": str(preset_identifier),
+        "updatedAt": int(time.time()),
+    }
+    CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    tmp_path = APP_PRESETS_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as app_file:
+        json.dump(remembered, app_file, indent=2)
+    tmp_path.replace(APP_PRESETS_PATH)
+
+
+def remembered_preset_identifier(identity_type, identity_value):
+    entry = load_app_presets().get(app_identity_key(identity_type, identity_value), {})
+    return entry.get("presetIdentifier") if isinstance(entry, dict) else None
+
+
 def generate_script(presets):
     """Bake the preset list into a KWin JavaScript file. Each preset becomes a
     named shortcut that resizes (and optionally re-centers) the active window."""
@@ -143,6 +183,7 @@ def generate_script(presets):
             "height": int(preset["height"]),
             "position": preset.get("position", "keep"),
             "category": preset_category(preset),
+            "identifier": preset["identifier"],
         }
         for preset in presets
     ]
@@ -225,10 +266,35 @@ function applyToActiveWindow(targetWidth, targetHeight, position, windowOverride
     }}
 }}
 
+function applicationIdentity(win) {{
+    if (win.desktopFileName) return {{ type: "desktopFileName", value: win.desktopFileName }};
+    if (win.resourceClass) return {{ type: "resourceClass", value: win.resourceClass }};
+    if (win.resourceName) return {{ type: "resourceName", value: win.resourceName }};
+    return null;
+}}
+
+function publishActiveApplication(win) {{
+    var identity = applicationIdentity(win);
+    if (!identity) return;
+    callDBus("org.justright.tray", "/SizeOverlay", "", "showActiveApplication",
+             identity.type, identity.value);
+}}
+
+function applyPreset(preset, windowOverride) {{
+    var win = windowOverride || workspace.activeWindow;
+    if (!win) return;
+    var identity = applicationIdentity(win);
+    if (identity) {{
+        callDBus("org.justright.tray", "/SizeOverlay", "", "rememberPreset",
+                 identity.type, identity.value, preset.identifier);
+    }}
+    applyToActiveWindow(preset.width, preset.height, preset.position, win);
+}}
+
 for (var presetIndex = 0; presetIndex < windowSizerPresets.length; presetIndex++) {{
     (function (preset) {{
         registerShortcut(preset.actionName, preset.label, "", function () {{
-            applyToActiveWindow(preset.width, preset.height, preset.position);
+            applyPreset(preset);
         }});
     }})(windowSizerPresets[presetIndex]);
 }}
@@ -239,7 +305,7 @@ registerUserActionsMenu(function (win) {{
         return {{
             text: preset.menuLabel,
             triggered: function () {{
-                applyToActiveWindow(preset.width, preset.height, preset.position, win);
+                applyPreset(preset, win);
             }}
         }};
     }}
@@ -331,6 +397,13 @@ registerShortcut("WindowSizer_RequestRatioArea", "Just Right: Refresh ratio menu
              "", "showRatioArea",
              Math.round(area.width), Math.round(area.height));
 }});
+
+registerShortcut("WindowSizer_RequestActiveApplication", "Just Right: Refresh active application", "", function() {{
+    var win = workspace.activeWindow;
+    if (win) publishActiveApplication(win);
+}});
+
+workspace.windowActivated.connect(function (win) {{ publishActiveApplication(win); }});
 """
     CONFIG_DIRECTORY.mkdir(parents=True, exist_ok=True)
     with open(GENERATED_SCRIPT_PATH, "w", encoding="utf-8") as script_file:
