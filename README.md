@@ -37,6 +37,9 @@ the right backend at launch.
 - **Runs on KDE and X11.** One tray app; it auto-detects the desktop and uses
   the KWin backend on Plasma or the `wmctrl` backend on X11 (Mint / Cinnamon,
   beta).
+- **Window type filtering (KDE).** Choose which window types trigger the size
+  OSD from the system-tray menu. Normal, Dialog, and Utility windows can be
+  enabled or disabled individually. All other window types are ignored.
 
 ## Install
 
@@ -85,10 +88,15 @@ work. See **Notes / limits** for what is KDE-only.
 
 - Presets: `~/.config/window-sizer/presets.json`
 - Generated KWin script: `~/.config/window-sizer/window-sizer.js`
+- Window type settings (KDE): `~/.config/window-sizer/settings.json`
 
 Each preset is `{ "name", "width", "height", "position", "identifier" }`, where
 `position` is `"keep"` or `"center"`. The `identifier` is stable across renames
 so any keyboard shortcut you assign stays bound.
+
+All three window types are enabled by default. Changes made through the
+**Window Types** tray submenu are saved automatically and applied when the
+KWin script reloads.
 
 ## How it works
 
@@ -110,6 +118,10 @@ monitor, so it works correctly across multiple displays.
 - A window that declares itself non-resizable is left alone.
 - If you change presets, the tray reloads automatically. If you edit
   `presets.json` by hand, pick **Reload backend** from the tray menu.
+- **Wayland window types.** KWin may classify some Dialog and Utility
+  windows as Normal windows under native Wayland. Window type filtering
+  follows KWin's reported classification, so disabling Normal windows
+  may also suppress the size OSD for those windows.
 
 ### X11 backend (beta)
 

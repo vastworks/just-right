@@ -268,9 +268,38 @@ class WindowSizerTray:
         self.menu.addAction("Add current window size…", self._trigger_add_current_size)
         self.menu.addSeparator()
         self.menu.addAction("Edit presets…", self.open_editor)
+        self._add_window_types_menu()
         self.menu.addAction("Reload backend", self.reload_script)
         self.menu.addSeparator()
         self.menu.addAction("Quit", self.application.quit)
+
+    def _add_window_types_menu(self):
+        """Add checkable filters for the KWin size overlay."""
+        if self.backend.name != "kwin":
+            return
+
+        window_types = sizer_engine.load_window_types()
+        submenu = self.menu.addMenu("Window Types")
+
+        for key, label in (
+            ("normal", "Normal window"),
+            ("dialog", "Dialog window"),
+            ("utility", "Utility window"),
+        ):
+            action = submenu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(window_types[key])
+            action.toggled.connect(
+                lambda checked, kind=key: self._set_window_type(kind, checked)
+            )
+
+    def _set_window_type(self, kind, enabled):
+        """Save a window type preference and reload the KWin script."""
+        window_types = sizer_engine.load_window_types()
+        window_types[kind] = enabled
+
+        sizer_engine.save_window_types(window_types)
+        self.reload_script()
 
     def _add_ratio_menu(self):
         """Add the 'Resize to ratio' submenu. Holding Alt while it is open flips
